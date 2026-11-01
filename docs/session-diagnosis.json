@@ -1,0 +1,29 @@
+{
+  "findings": [
+    {
+      "issue": "Earlier executor policy refusals",
+      "resolution": "Specific rationale absent from available logs; no causal claim made. Subsequent authorized direct Python startup and live transport succeeded."
+    },
+    {
+      "issue": "Gateway WAF rejected raw reports",
+      "resolution": "Use compact deterministic status notifications; preserve full reports locally. Persist explicit rejections without automatic retry."
+    },
+    {
+      "issue": "Runtime ACL identity mismatch",
+      "resolution": "Use current Windows user SID rather than ambiguous short account name."
+    },
+    {
+      "issue": "Role output mistaken for acceptance configuration",
+      "resolution": "Supervisor owns immutable checks; reports remain data."
+    },
+    {
+      "issue": "Pre-execution Write schema error",
+      "resolution": "Narrow audited warning classification; independent review, tests and acceptance still required."
+    },
+    {
+      "issue": "Expected negative-test exit treated as failure",
+      "resolution": "Explicitly assert expected exit status inside test command."
+    }
+  ],
+  "final_regression": "passed; see verification-2026-11-01.json"
+}

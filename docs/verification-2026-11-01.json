@@ -1,0 +1,14 @@
+{
+  "scope": "Isolated integration smoke; business repository acceptance not included",
+  "automated_tests": 89,
+  "projects": 2,
+  "independent_role_sessions": 8,
+  "file_acceptance": "passed",
+  "mattermost_dm_aggregate": "read-back verified",
+  "mattermost_channel_status": "read-back verified",
+  "multica_issue": "triggered once, result comment once, status done",
+  "restart_deduplication": "passed",
+  "six_project_queue_with_two_slots": "passed",
+  "pending_notifications": 0,
+  "private_evidence": "Detailed identifiers and logs retained locally, excluded from public repository"
+}
