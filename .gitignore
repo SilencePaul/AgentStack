@@ -1,5 +1,12 @@
 .runtime/
+.diagnostics/
 __pycache__/
 *.pyc
 .venv/
 config.local.json
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.log
+credentials_cache.json
+user_token.env

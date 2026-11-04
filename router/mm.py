@@ -139,9 +139,16 @@ def pages(client, channel, since=None):
 
 
 class Poller:
-    def __init__(self, client, store, router, channels, allowed_user_ids, bot_id):
+    def __init__(self, client, store, router, channels, allowed_user_ids, bot_id, accept_query=None):
         self.client, self.store, self.router = client, store, router
         self.channels, self.allowed, self.bot_id = channels, set(allowed_user_ids), bot_id
+        self.accept_query = accept_query
+
+    def _accept(self, text, route):
+        from .diagnostics import is_diagnostic_query
+        if self.accept_query is not None:return self.accept_query(text)
+        if is_diagnostic_query(text):return False
+        return text == '/router' or text.startswith('/router ') or (route.get('dm_user') and text and not text.startswith('/'))
 
     def poll(self):
         errors = []
@@ -179,7 +186,7 @@ class Poller:
                 if (p.get('user_id') in self.allowed and p.get('user_id') != self.bot_id
                         and not p.get('type') and not p.get('delete_at') and not p.get('edit_at')
                         and not p.get('props', {}).get('from_bot')
-                        and (text == '/router' or text.startswith('/router ') or (route.get('dm_user') and text and not text.startswith('/')))):
+                        and self._accept(text, route)):
                     reply = {**route, 'root_id': p.get('root_id') or p['id'], 'source_user_id': p['user_id']}
                     try:
                         answer = self.router.handle(text, source_key=p['id'], reply_to=reply)

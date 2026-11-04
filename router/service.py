@@ -19,6 +19,12 @@ class Router:
             if len(pieces)<4 or not pieces[3].strip():raise ValueError('用法：/router run 项目ID 目标')
             t=self.store.submit(pieces[2],pieces[3],source_key,reply_to)
             return f"已记录 {t['id']}，项目 {t['project_id']}，状态 {t['status']}。将按并发限制执行。"
+        if action=='answer':
+            if len(pieces)<4:raise ValueError('用法：/router answer 任务ID 问题ID 答案')
+            answer=pieces[3].split(maxsplit=1)
+            if len(answer)!=2:raise ValueError('请提供问题ID和答案')
+            self.store.answer(pieces[2],answer[0],answer[1],reply_to)
+            return '回答已记录；将核对检查点后从该阶段新建会话继续，不重跑已完成阶段。'
         if action=='status':return self.summary()
         if action in ('pause','resume'):
             self.store.set_meta('paused','1' if action=='pause' else '0')
@@ -87,7 +93,10 @@ class Scheduler:
                 worker.stop('supervisor error')
                 result={'status':'failed','summary':'Worker monitor failed: '+type(exc).__name__,'evidence':[]}
             if result is not None:
-                self.store.finish(task_id,result['status'],result.get('summary',''),result.get('evidence'))
+                if result['status']=='waiting_input':
+                    self.store.wait_input(task_id,result['checkpoint'],result.get('evidence'))
+                else:
+                    self.store.finish(task_id,result['status'],result.get('summary',''),result.get('evidence'))
                 del self.workers[task_id]
         if self.store.meta('paused','0')=='1':return
         while len(self.workers)<self.limit:
@@ -95,7 +104,7 @@ class Scheduler:
             if not task:break
             worker=None
             try:
-                worker=self.factory(self.command,task,self.runtime/task['id'],
+                worker=self.factory(self.command,task,self.runtime/task['id']/('attempt-'+str(task['attempt'])),
                                     lambda kind,detail,tid=task['id']:self.store.event(tid,kind,detail))
                 worker.start();self.workers[task['id']]=worker
             except Exception as exc:

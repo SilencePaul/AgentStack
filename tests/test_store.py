@@ -66,7 +66,7 @@ class StoreTests(unittest.TestCase):
             with self.assertRaises(ValueError): s.update_project('a',timeout=-1)
             s.close()
 
-    def test_history_is_scoped_bounded_and_immutable(self):
+    def test_new_task_context_excludes_history_and_is_immutable(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); a=root/'a'; b=root/'b'; a.mkdir(); b.mkdir()
             s=Store(':memory:'); s.add_project('a',a,context='registered'); s.add_project('b',b)
@@ -77,7 +77,7 @@ class StoreTests(unittest.TestCase):
             current=s.submit('a','current')
             history=current['project']['context']
             self.assertIn('registered',history)
-            self.assertIn('report 3',history)
+            self.assertNotIn('report 3',history)
             self.assertNotIn('report 3',current['rules_snapshot'])
             self.assertNotIn('registered',current['rules_snapshot'])
             self.assertNotIn('report 0',history)

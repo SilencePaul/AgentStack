@@ -130,13 +130,19 @@ def main():
     a=sub.add_parser('project-update');a.add_argument('id');a.add_argument('--rules');a.add_argument('--context')
     sub.add_parser('status');sub.add_parser('projects');sub.add_parser('stop')
     a=sub.add_parser('show');a.add_argument('id')
+    a=sub.add_parser('answer');a.add_argument('id');a.add_argument('question_id');a.add_argument('text')
     a=sub.add_parser('serve');a.add_argument('--once',action='store_true')
     args=p.parse_args();runtime=Path(args.runtime).resolve();runtime.mkdir(parents=True,exist_ok=True)
     rules=Path(__file__).with_name('common-rules.md').read_text(encoding='utf-8')
     store=Store(runtime/'router.sqlite3',common_rules=rules)
     router=Router(store)
     try:
-        if args.action=='project-add':
+        if args.action=='answer':
+            task=store.get(args.id)
+            if not task:raise ValueError('Unknown task')
+            store.answer(args.id,args.question_id,args.text,task['reply_to'])
+            print('Answer saved by local operator; checkpoint will be validated before continuation.')
+        elif args.action=='project-add':
             store.add_project(args.id,str(Path(args.path).resolve()),rules=Path(args.rules).read_text(encoding='utf-8') if args.rules else '',context=Path(args.context).read_text(encoding='utf-8') if args.context else '',timeout=args.timeout,idle_timeout=args.idle_timeout)
             print('Project registered:',args.id)
         elif args.action=='project-update':

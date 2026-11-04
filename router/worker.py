@@ -8,6 +8,7 @@ import threading
 import time
 import uuid
 from .process_tree import ProcessTree
+from .diagnostics import tool_activity
 from .verification import Checks, Evidence, render_report
 from pathlib import Path
 
@@ -67,6 +68,8 @@ class Worker:
         (self.run_dir/'prompt.txt').write_text(prompt, encoding='utf-8')
         (self.run_dir/'task.json').write_text(json.dumps(self.task, ensure_ascii=False, indent=2), encoding='utf-8')
         try:
+            if len(prompt)>100000:raise ValueError('Context input exceeds 100000 characters; narrow the task or project context')
+            self._event('context_prepared', {'characters':len(prompt),'session_mode':'checkpoint_new' if self.task.get('continuation') else 'new'})
             check_prompt = self.task['goal']
             if 'acceptance' in self.task:
                 check_prompt = '```bridge-checks\n' + json.dumps(self.task['acceptance']) + '\n```'
@@ -131,6 +134,7 @@ class Worker:
                         event = json.loads(line)
                         if isinstance(event, dict):
                             self.runtime_evidence.observe(event)
+                            for activity in tool_activity(event):self._event('tool_activity', activity)
                             if event.get('subtype') in ('task_started', 'background_tasks_changed') or event.get('type') in ('task_started', 'background_tasks_changed'):
                                 self.native_async_seen = True
                             message = event.get('message', {})
@@ -157,7 +161,8 @@ class Worker:
         return 'succeeded' if all(ok for ok, _ in results) else 'failed'
 
     def _finish(self, status, summary):
-        self.result = {'status': status, 'summary': summary, 'evidence': str(self.run_dir.resolve()),
+        self.result = {'status': status, 'summary': summary, 'session_id': self.session_id,
+                       'process_exit_code': self.process.poll() if self.process else None, 'evidence': str(self.run_dir.resolve()),
                        'validation_warnings': self.runtime_evidence.validation_warnings}
         (self.run_dir/'result.json').write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
         self._event('finished', self.result)

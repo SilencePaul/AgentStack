@@ -100,3 +100,12 @@ python -m compileall -q router tests
 ## 外部依赖
 
 Python 3.13、已登录的 Qoder CLI，以及由部署方自行提供的 ai-crew CLI。公司内部技能源码、凭据、网关地址和现场记录不包含在本仓库中。通信适配器要求的 CLI 能力见 `docs/integration-contract.md`。仅配置 Qoder 即可使用本地队列；MM/Multica 可选启用。
+
+
+## 2026-11-04：任务续接与独立观察台
+
+新增结构化提问回执、持久检查点、同一任务分阶段续接、独立只读网页和精简MM诊断。进程退出、角色返回与任务验收分开记录。
+
+运行与升级见 [任务续接说明](docs/task-continuity.md)。当前仍使用四个独立Qoder角色会话，续接采用检查点＋新会话，未启用原生resume。
+
+GitHub版本包含通用运行代码；组织专用CLI、凭据、内部安装配置和业务任务材料不随仓库分发。

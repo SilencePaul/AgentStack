@@ -171,7 +171,7 @@ class MulticaPoller:
             if not intent['task_id']:
                 continue
             task = self.store.get(intent['task_id'])
-            if task is None or task['status'] in ('queued', 'running'):
+            if task is None or task['status'] in ('queued', 'running', 'waiting_input'):
                 continue
             fields, summary = terminal_report(task)
             self.store.set_meta('mc.report:' + task['id'], fields)
