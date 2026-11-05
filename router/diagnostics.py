@@ -9,7 +9,7 @@ import threading
 import time
 
 QUERIES={'现在谁在干什么','现在谁在干活','谁在干什么','现在各个agent的状态','各个agent的状态','router状态','router还活着吗','卡在哪里','现在卡在哪里','哪里卡住了','查看agent状态','现在谁在干什么，卡在哪里','现在谁在干什么、卡在哪里','现在各个agent都在干什么','现在各个agent在干什么','各agent状态','现在router状态','现在进度怎么样','现在什么进度'}
-ROLES=('developer','reviewer','tester','lead-report')
+ROLES=('lead-plan','developer','reviewer','tester','lead-triage','lead-report')
 
 
 def is_diagnostic_query(text):
@@ -133,7 +133,7 @@ class DiagnosticRouter:
                 name=latest.get('tool') or next((d.get('tool') for d,t in tools if d.get('tool_id')==latest.get('tool_id') and d.get('tool')), 'unknown')
                 state={'started':'已发起，尚未记录返回','returned':'已返回','error':'返回错误（不代表后续未恢复）'}.get(latest.get('state'),'未知')
                 lines.append('  最近工具：'+safe_label(name)+'，'+state+'；'+str(max(0,int(now-when)))+'秒前')
-            elif began and finished:lines.append('  阶段已返回；'+('汇总角色未启用工具。' if role=='lead-report' else '未记录可识别工具事件。'))
+            elif began and finished:lines.append('  阶段已返回；'+('汇总角色未启用工具。' if role.startswith('lead-') else '未记录可识别工具事件。'))
             elif began:lines.append('  暂无可识别工具事件；可能在思考/等待，也可能输出格式不支持。')
         if task['status']=='waiting_input' and 'continuation' in task.keys() and task['continuation']:
             cp=json.loads(task['continuation'])

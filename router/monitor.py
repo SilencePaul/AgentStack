@@ -7,6 +7,7 @@ import re
 import sqlite3
 from urllib.parse import urlsplit, parse_qs
 from .diagnostics import DiagnosticRouter
+from .dashboard import dashboard
 
 
 def snapshot(path, task_id=None):
@@ -16,10 +17,10 @@ def snapshot(path, task_id=None):
         try:
             with sqlite3.connect(Path(path).resolve().as_uri()+'?mode=ro',uri=True,timeout=1) as db:
                 db.row_factory=sqlite3.Row
+                data.update(dashboard(db))
                 if task_id:
                     row=db.execute('SELECT summary,evidence FROM tasks WHERE id=?',(task_id,)).fetchone()
                     if row:data['result']={'summary':row['summary'] or '', 'evidence':json.loads(row['evidence']) if row['evidence'] else None}
-                data['tasks']=[dict(r) for r in db.execute('SELECT id,project_id,status,created_at FROM tasks ORDER BY rowid DESC LIMIT 100')]
             db.close()
         except sqlite3.Error:pass
     if task_id:data['detail']=diag.handle('/diag show '+task_id)

@@ -124,3 +124,17 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(evidence.tool_errors,3)
         evidence.observe({'type':'result','permission_denials':['denied']})
         self.assertEqual(evidence.permission_denials,1)
+
+    def test_project_tool_path_is_scoped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);bindir=root/'bin';bindir.mkdir();fake=root/'probe.py'
+            fake.write_text("import os,json;print(json.dumps({'type':'result','result':os.environ.get('PATH','')}))")
+            task=dict(id='path',project_id='p',goal='check',project=dict(path=str(root),tool_paths=[str(bindir)],timeout=3,idle_timeout=3))
+            before=os.environ.get('PATH')
+            w=Worker([sys.executable,str(fake)],task,root/'run',lambda *args:None);w.start()
+            for _ in range(100):
+                result=w.poll()
+                if result:break
+                time.sleep(.02)
+            self.assertIsNotNone(result);self.assertTrue(w.result_summary.startswith(str(bindir)))
+            self.assertEqual(os.environ.get('PATH'),before)

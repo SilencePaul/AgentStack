@@ -30,6 +30,18 @@ class ContinuityTests(unittest.TestCase):
         self.assertEqual(read_receipt(text),body)
         for invalid in (text+'\n'+text,'```router-receipt\n{}\n```',text+' trailing'):
             with self.assertRaises(ValueError):read_receipt(invalid)
+    def test_receipt_allows_plain_explanation_but_not_conflicts(self):
+        body={'status':'needs_input','question':'A or B?','completed':'Read code','remaining':'Wait then edit'}
+        text='```router-receipt\n'+json.dumps(body)+'\n```'
+        self.assertEqual(read_receipt(text+'\nWaiting on your A/B choice.'),body)
+        self.assertEqual(read_receipt(text+'\nContinue after the answer.'),body)
+        for tail in ('\n```python\nrun()\n```','\n~~~sh\nrun\n~~~','\nROUTER_REVIEW: PASS','\nROUTER_TEST: BLOCKED','\nROUTER_LEAD: REWORK','\n'+text):
+            with self.subTest(tail=tail),self.assertRaises(ValueError):read_receipt(text+tail)
+        for key,value in (('status','succeeded'),('question',''),('completed',[]),('remaining',None)):
+            invalid={**body,key:value}
+            with self.assertRaises(ValueError):
+                read_receipt('```router-receipt\n'+json.dumps(invalid)+'\n```\nWaiting.')
+
     def test_wait_survives_restart_and_answer_is_bound(self):
         self.wait();self.store.recover()
         self.assertEqual(self.store.get(self.task['id'])['status'],'waiting_input')
@@ -65,6 +77,7 @@ class ContinuityTests(unittest.TestCase):
             def stop(self,reason):pass
         t=self.store.claim();t['project']['path']=str(self.repo)
         w=TeamWorker(['fake'],t,self.root/'run1',lambda *a:None,Child);w.start()
+        w.child.result_summary='ROUTER_LEAD: PLAN';w.poll()
         w.child.result_summary='developer done';w.poll()
         w.child.result_summary='```router-receipt\n'+json.dumps({'status':'needs_input','question':'Choose?','completed':'Read diff','remaining':'Review'})+'\n```'
         result=w.poll();self.assertEqual(result['status'],'waiting_input')
@@ -75,7 +88,7 @@ class ContinuityTests(unittest.TestCase):
         w2=TeamWorker(['fake'],t,self.root/'run2',lambda *a:None,Child);w2.start()
         self.assertIn('ROLE: reviewer',w2.child.task['goal'])
         self.assertIn('yes',w2.child.task['goal'])
-        self.assertEqual(len(w2.reports),1)
+        self.assertEqual(len(w2.reports),2)
         (self.repo/'changed').write_text('change')
         w3=TeamWorker(['fake'],t,self.root/'run3',lambda *a:None,Child);w3.start()
         self.assertEqual(w3.result['status'],'failed');self.assertIsNone(w3.child)

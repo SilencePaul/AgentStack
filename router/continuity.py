@@ -9,16 +9,29 @@ RECEIPT_INSTRUCTION = '''If a human answer is essential, stop doing work and end
 ```router-receipt
 {"status":"needs_input","question":"one clear question","completed":"observed progress","remaining":"next steps"}
 ```
-Do not include secrets in the question. Exit normally after this receipt. This is NOT completion.
+Do not include secrets in the question. The closing fence must be alone on its line.
+Put any explanation before the receipt; output nothing after it. Never combine needs_input with
+PASS/BLOCKED verdicts or instructions to keep executing. Exit normally and wait for the human answer.
+This is NOT completion.
 Otherwise finish the assigned phase normally, preserving any required terminal PASS/BLOCKED marker.
 '''
 
 
 def read_receipt(text):
     if '```router-receipt' not in text:return None
-    blocks=re.findall(r'^```router-receipt\s*\n(.*?)^```\s*$',text,re.M|re.S)
-    if len(blocks)!=1 or text.count('```router-receipt')!=1 or not text.rstrip().endswith('```'):
+    matches=list(re.finditer(r'^```router-receipt[ \t]*\r?\n(.*?)^```[ \t]*(?=\r?$)',text,re.M|re.S))
+    if len(matches)!=1 or text.count('```router-receipt')!=1:
         raise ValueError('Malformed question receipt')
+    match=matches[0]
+    tail=text[match.end():]
+    outside=text[:match.start()]+tail
+    if '```' in tail or '~~~' in tail or re.search(r'\bROUTER_(?:REVIEW|TEST|LEAD)\s*:\s*(?:PASS|BLOCKED|PLAN|REWORK|STOP)\b',outside):
+        raise ValueError('Conflicting content after question receipt')
+    if len(tail)>4000:
+        raise ValueError('Question receipt explanation exceeds limit')
+    # Trailing prose is ignored, never interpreted as permission to execute or
+    # a completion verdict. Only the validated needs_input payload is returned.
+    blocks=[match.group(1)]
     if len(blocks[0])>12000:raise ValueError('Question receipt exceeds limit')
     data=json.loads(blocks[0])
     if not isinstance(data,dict) or set(data)!={'status','question','completed','remaining'} or data['status']!='needs_input':

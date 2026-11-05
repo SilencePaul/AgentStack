@@ -19,7 +19,8 @@ class ProcessTests(unittest.TestCase):
             fake.write_text('''import sys,json
 from pathlib import Path
 p=sys.stdin.read()
-if 'ROLE: developer' in p:
+if 'ROLE: lead-plan' in p:out='ROUTER_LEAD: PLAN'
+elif 'ROLE: developer' in p:
     if '"answer": "confirmed"' not in p:
         out='```router-receipt\\n'+json.dumps({'status':'needs_input','question':'Confirm?','completed':'Ready','remaining':'Write proof'})+'\\n```'
     else:
@@ -51,9 +52,9 @@ print(json.dumps({'type':'result','result':out}))
                 scheduler=Scheduler(s,[sys.executable,str(fake)],root/'runs');until('succeeded')
                 self.assertEqual(s.get(t['id'])['attempt'],2)
                 results=list((root/'runs').glob('*/attempt-*/*/result.json'))
-                self.assertEqual(len(results),5)
-                sessions=[json.loads(p.read_text())['session_id'] for p in results]
-                self.assertEqual(len(set(sessions)),5)
-                self.assertTrue(all(json.loads(p.read_text())['process_exit_code']==0 for p in results))
+                self.assertEqual(len(results),6)
+                sessions=[json.loads(p.read_text(encoding='utf-8'))['session_id'] for p in results]
+                self.assertEqual(len(set(sessions)),6)
+                self.assertTrue(all(json.loads(p.read_text(encoding='utf-8'))['process_exit_code']==0 for p in results))
                 self.assertEqual(len(s.outbox_pending()),2)  # question + final, no progress spam
             finally:scheduler.shutdown();s.close()

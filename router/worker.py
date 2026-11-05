@@ -17,6 +17,21 @@ def clean_environment():
     return {k: v for k, v in os.environ.items() if not any(s in k.upper() for s in ('MM_', 'MATTERMOST', 'AI_CREW', 'AICREW', 'FEISHU', 'LARK_'))}
 
 
+def role_skill_settings(command, project_path, env, skills, timeout):
+    inventory = subprocess.run([*command, 'skills', 'list', '--all'], cwd=project_path, env=env,
+                               capture_output=True, text=True, encoding='utf-8', timeout=timeout)
+    if inventory.returncode:
+        raise ValueError('Cannot read Qoder skill inventory')
+    catalog = dict(re.findall(r'^(\S+) \[(Enabled|Disabled)\]', inventory.stdout, re.MULTILINE))
+    available = {name for name, state in catalog.items() if state == 'Enabled'}
+    if not catalog:
+        raise ValueError('Qoder returned no recognizable enabled skills')
+    missing = set(skills) - available
+    if missing:
+        raise ValueError('Unavailable role skills: ' + ', '.join(sorted(missing)))
+    return json.dumps({'skills': {'disabled': sorted(set(catalog) - set(skills))}})
+
+
 class Worker:
     def __init__(self, command, task, run_dir, on_event, allow_native_teams=False):
         self.allow_native_teams = allow_native_teams
@@ -29,6 +44,7 @@ class Worker:
         self.threads = []
         self.last_output = ''
         self.model_error = False
+        self.observed_skills = None
         self.result_summary = None
         self.tree = None
         self.runtime_evidence = Evidence()
@@ -84,8 +100,24 @@ class Worker:
             self._finish('failed', str(exc))
             return
         env = clean_environment()
+        tool_paths = project.get('tool_paths', [])
+        if tool_paths:
+            root = Path(project['path']).resolve()
+            paths = [Path(p).resolve(strict=True) for p in tool_paths]
+            if any(not p.is_dir() or not p.is_relative_to(root) for p in paths):
+                raise ValueError('Project tool paths must be directories inside its workspace')
+            path_key = next((key for key in env if key.upper() == 'PATH'), 'PATH')
+            env[path_key] = os.pathsep.join(map(str, paths)) + os.pathsep + env.get(path_key, '')
         env['QODER_AGENT_TEAMS'] = '1' if self.allow_native_teams else '0'
         args = self.command + ['--print', '--output-format', 'stream-json', '--permission-mode', 'bypass_permissions', '--session-id', self.session_id]
+        if 'role_skills' in self.task:
+            try:
+                settings = role_skill_settings(self.command, project['path'], env, self.task['role_skills'],
+                                               min(30, project.get('timeout', 1800)))
+            except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+                self._finish('failed', 'Role skill configuration failed: ' + str(exc))
+                return
+            args += ['--settings', settings]
         if not self.allow_native_teams:
             args += ['--disallowed-tools', 'Agent']
         if self.task.get('tools_disabled'):
@@ -133,6 +165,11 @@ class Worker:
                     try:
                         event = json.loads(line)
                         if isinstance(event, dict):
+                            if event.get('type') == 'system' and event.get('subtype') == 'init' and 'role_skills' in self.task:
+                                observed = event.get('skills')
+                                if isinstance(observed,list) and all(isinstance(item,str) for item in observed):
+                                    self.observed_skills = sorted(observed)
+                                    self._event('role_skills_loaded', {'skills':self.observed_skills})
                             self.runtime_evidence.observe(event)
                             for activity in tool_activity(event):self._event('tool_activity', activity)
                             if event.get('subtype') in ('task_started', 'background_tasks_changed') or event.get('type') in ('task_started', 'background_tasks_changed'):
@@ -178,6 +215,8 @@ class Worker:
             self.tree.close()
             for thread in self.threads:
                 thread.join(timeout=1)
+            if code == 0 and 'role_skills' in self.task and self.observed_skills != sorted(self.task['role_skills']):
+                return self._finish('failed', 'Qoder startup did not confirm the configured skill list; inspect stdout.log.')
             status = self._verify() if code == 0 and not self.model_error else 'failed'
             model_text = self.result_summary or self.last_output or '(No model reply; see stdout.log and stderr.log)'
             summary, _ = render_report(model_text, code != 0 or self.model_error or self.native_async_seen, self.checks, self.runtime_evidence)

@@ -83,8 +83,8 @@ class Store:
             self.db.execute('INSERT INTO projects VALUES (?,?)', (project_id,json.dumps(config)))
         return config
 
-    def update_project(self, project_id, rules=None, context=None, model=None, timeout=None, idle_timeout=None):
-        changes = dict(rules=rules, context=context, model=model, timeout=timeout, idle_timeout=idle_timeout)
+    def update_project(self, project_id, rules=None, context=None, model=None, timeout=None, idle_timeout=None, agent_profiles=None):
+        changes = dict(rules=rules, context=context, model=model, timeout=timeout, idle_timeout=idle_timeout, agent_profiles=agent_profiles)
         for key in ('timeout', 'idle_timeout'):
             value = changes[key]
             if value is not None and not (isinstance(value, (int, float)) and math.isfinite(value) and value > 0):
@@ -152,6 +152,17 @@ class Store:
             self.db.execute("UPDATE tasks SET status='running',attempt=attempt+1 WHERE id=?",(row['id'],))
             return self.get(row['id'])
 
+    def question_route(self, task):
+        if task['reply_to'] is not None:
+            return task['reply_to']
+        parent = re.fullmatch(r'plan:([0-9a-f]{32}):[0-9]+', task.get('source_key') or '')
+        if parent:
+            with self.lock:
+                row = self.db.execute('SELECT reply_to FROM planning WHERE id=?', (parent[1],)).fetchone()
+            if row and row['reply_to']:
+                return json.loads(row['reply_to'])
+        return None
+
     def wait_input(self, task_id, checkpoint, evidence):
         with self.transaction():
             task=self.get(task_id)
@@ -159,8 +170,9 @@ class Store:
             self.db.execute("UPDATE tasks SET status='waiting_input',continuation=?,evidence=?,summary=? WHERE id=?",
                 (json.dumps(checkpoint),json.dumps(evidence),checkpoint['question'],task_id))
             self.event(task_id,'waiting_input',{'question_id':checkpoint['question_id'],'phase_index':checkpoint['index']})
-            if task['reply_to']:
-                self._notice(task['reply_to'],'任务 '+task_id+' 等待回答：'+checkpoint['question']+'\n在本线程回复：/router answer '+task_id+' '+checkpoint['question_id']+' 你的答案',
+            route = self.question_route(task)
+            if route:
+                self._notice(route,'任务 '+task_id+' 等待回答：'+checkpoint['question']+'\n在本线程回复：/router answer '+task_id+' '+checkpoint['question_id']+' 你的答案',
                     'question:'+task_id+':'+checkpoint['question_id'],task_id)
 
     def answer(self, task_id, question_id, answer, reply_to=None):
@@ -168,7 +180,7 @@ class Store:
         with self.transaction():
             task=self.get(task_id)
             if not task or task['status']!='waiting_input':raise ValueError('Task is not waiting for an answer')
-            route=task['reply_to']
+            route=self.question_route(task)
             if route is None:
                 authorized=reply_to is None
             else:

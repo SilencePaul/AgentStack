@@ -1,0 +1,36 @@
+{
+  "variables": {
+    "PROJECT_NAME": "example-project",
+    "PROJECT_TECH_STACK": "按该项目仓库说明确定"
+  },
+  "roles": {
+    "leader": {
+      "id": "PROJECT_MANAGER",
+      "version": "v1",
+      "directory": "leader",
+      "skills": []
+    },
+    "developer": {
+      "id": "FS_DEV",
+      "version": "v1",
+      "directory": "developer",
+      "skills": [
+        "debug"
+      ]
+    },
+    "reviewer": {
+      "id": "CR",
+      "version": "v1",
+      "directory": "reviewer",
+      "skills": []
+    },
+    "tester": {
+      "id": "QA",
+      "version": "v1",
+      "directory": "tester",
+      "skills": [
+        "verify"
+      ]
+    }
+  }
+}

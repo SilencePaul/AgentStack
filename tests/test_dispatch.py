@@ -26,6 +26,21 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(self.queue.flush_reports(),1)
         self.assertEqual(self.queue.flush_reports(),0)
         self.assertEqual(len(self.store.outbox_pending()),2)
+    def test_planned_question_returns_to_original_thread_and_final_is_aggregated(self):
+        route={'channel_id':'c','root_id':'thread','source_user_id':'owner'}
+        self.queue.enqueue('work','source',route)
+        self.queue.process_one(FakePlanner({'tasks':[{'project_id':'a','goal':'do work'}],'clarification':None}))
+        tid=self.store.claim()['id']
+        self.store.wait_input(tid,{'question_id':'q','index':0,'question':'A or B?','answers':[]},None)
+        self.assertEqual(self.store.outbox_pending()[-1]['reply_to'],route)
+        with self.assertRaises(ValueError):
+            self.store.answer(tid,'q','B',{**route,'root_id':'other'})
+        self.store.answer(tid,'q','B',route)
+        self.store.claim()
+        self.store.finish(tid,'succeeded','done',None)
+        self.assertEqual(self.queue.flush_reports(),1)
+        self.assertEqual(len(self.store.outbox_pending()),3)  # plan, question, aggregate
+
     def test_invalid_plan_atomic(self):
         self.queue.enqueue('work','source',{})
         self.queue.process_one(FakePlanner({'tasks':[{'project_id':'a','goal':'ok'},{'project_id':'bad','goal':'bad'}],'clarification':None}))

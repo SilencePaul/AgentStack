@@ -119,7 +119,7 @@ class PlanningQueue:
                 lines=['跨项目汇总报告：'+row['id']]
                 for task in tasks:
                     lines.append('\n'+task['project_id']+' / '+task['id']+' / '+task['status'])
-                    lines.append('四阶段报告与独立验收证据已保存，本机索引：'+task['id'])
+                    lines.append('团队报告与独立验收证据已保存，本机索引：'+task['id'])
                 self._notice(row,'\n'.join(lines)[:40000],'report')
                 self.store.db.execute("UPDATE planning SET reported=1,status='completed' WHERE id=?",(row['id'],))
                 count+=1

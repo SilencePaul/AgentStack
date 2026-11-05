@@ -127,7 +127,7 @@ def main():
     a=sub.add_parser('project-add');a.add_argument('id');a.add_argument('path');a.add_argument('--rules');a.add_argument('--context');a.add_argument('--timeout',type=int,default=1800);a.add_argument('--idle-timeout',type=int,default=300)
     a=sub.add_parser('goal');a.add_argument('text')
     a=sub.add_parser('submit');a.add_argument('project');a.add_argument('goal');a.add_argument('--goal-file',action='store_true')
-    a=sub.add_parser('project-update');a.add_argument('id');a.add_argument('--rules');a.add_argument('--context')
+    a=sub.add_parser('project-update');a.add_argument('id');a.add_argument('--rules');a.add_argument('--context');a.add_argument('--agents',help='Directory containing agents.json and role SOUL.md/AGENT.md')
     sub.add_parser('status');sub.add_parser('projects');sub.add_parser('stop')
     a=sub.add_parser('show');a.add_argument('id')
     a=sub.add_parser('answer');a.add_argument('id');a.add_argument('question_id');a.add_argument('text')
@@ -140,13 +140,14 @@ def main():
         if args.action=='answer':
             task=store.get(args.id)
             if not task:raise ValueError('Unknown task')
-            store.answer(args.id,args.question_id,args.text,task['reply_to'])
+            store.answer(args.id,args.question_id,args.text,store.question_route(task))
             print('Answer saved by local operator; checkpoint will be validated before continuation.')
         elif args.action=='project-add':
             store.add_project(args.id,str(Path(args.path).resolve()),rules=Path(args.rules).read_text(encoding='utf-8') if args.rules else '',context=Path(args.context).read_text(encoding='utf-8') if args.context else '',timeout=args.timeout,idle_timeout=args.idle_timeout)
             print('Project registered:',args.id)
         elif args.action=='project-update':
-            store.update_project(args.id,rules=Path(args.rules).read_text(encoding='utf-8') if args.rules else None,context=Path(args.context).read_text(encoding='utf-8') if args.context else None)
+            from .profiles import load_profiles
+            store.update_project(args.id,rules=Path(args.rules).read_text(encoding='utf-8') if args.rules else None,context=Path(args.context).read_text(encoding='utf-8') if args.context else None,agent_profiles=load_profiles(args.agents) if args.agents else None)
             print('Project updated; existing task snapshots unchanged.')
         elif args.action=='goal':
             from .dispatch import PlanningQueue,NaturalRouter
