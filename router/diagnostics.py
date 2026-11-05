@@ -42,17 +42,26 @@ class DiagnosticRouter:
     def handle(self,text,source_key=None,reply_to=None):
         parts=text.strip().split()
         task_id=None
+        report_page=None
         if parts and parts[0]=='/diag':
             if len(parts)==3 and parts[1]=='show' and re.fullmatch(r'[A-Za-z0-9_-]{1,64}',parts[2]):task_id=parts[2]
+            elif (len(parts) in (3,4) and parts[1]=='report'
+                  and re.fullmatch(r'[A-Za-z0-9_-]{1,64}',parts[2])
+                  and (len(parts)==3 or re.fullmatch(r'[1-9][0-9]{0,3}',parts[3]))):
+                task_id=parts[2]
+                report_page=int(parts[3]) if len(parts)==4 else 1
             elif parts not in (['/diag'],['/diag','status']):
-                return '只读诊断：/diag 或 /diag show 任务ID；也可问“现在谁在干什么”“卡在哪里”。不执行修复/重启/派单。'
+                return '只读诊断：/diag 或 /diag show 任务ID；/diag report 任务ID [页码] 获取脱敏报告；也可问“现在谁在干什么”“卡在哪里”。不执行修复/重启/派单。'
         elif not is_diagnostic_query(text):return '请用 /diag 查询。'
         if not self.path.exists():return '诊断进程在线；尚无Router数据库。请先配置并启动Router，诊断不会代建工作库。'
         try:
             with sqlite3.connect(self.path.resolve().as_uri()+'?mode=ro',uri=True,timeout=1) as db:
                 db.row_factory=sqlite3.Row
+                if report_page is not None:
+                    from .diagnostic_reports import report
+                    return report(db,self.path,task_id,report_page,reply_to)
                 return self._report(db,task_id)
-        except (sqlite3.Error,ValueError,TypeError,KeyError):
+        except (sqlite3.Error,OSError,ValueError,TypeError,KeyError):
             return '诊断进程在线；Router数据库暂不可读或结构不兼容。不能判断Agent当前状态；工作任务未被修改。'
         finally:
             if 'db' in locals():db.close()

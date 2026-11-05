@@ -206,7 +206,7 @@ class Store:
             self.db.execute('INSERT INTO metadata VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
                             ('project_paused:' + task['project_id'], 'true'))
         if task['reply_to'] is not None:
-            text = f"项目 {task['project_id']}\n任务 {task_id}\n状态 {status}\n完整报告与验收证据已保存，可在本机按任务编号查看。"
+            text = f"项目 {task['project_id']}\n任务 {task_id}\n状态 {status}\n通过 /diag report {task_id} 查询脱敏报告和工具报错。"
             self._notice(task['reply_to'], text, 'task:'+task_id, task_id)
 
     def finish(self, task_id, status, summary, evidence=None):

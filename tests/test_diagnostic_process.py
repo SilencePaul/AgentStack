@@ -63,6 +63,22 @@ elif a[0]=='say':
                 reply=next(p for p in json.loads(messages.read_text()) if p['user_id']=='bot')
                 self.assertIn('心跳过期',reply['message'])
                 self.assertIsNone(diag.poll())
+                from router.store import Store
+                work = Store(root/'work/router.sqlite3')
+                work.add_project('report-test', str(root))
+                task = work.submit('report-test', 'diagnose', reply_to={'channel_id':'c','source_user_id':'human'})
+                work.db.execute('UPDATE tasks SET status=?,summary=? WHERE id=?',
+                                ('failed', 'Bash failed: missing file token=do-not-send', task['id']))
+                work.close()
+                posts = json.loads(messages.read_text())
+                posts.append({'id':'report-query','channel_id':'c','user_id':'human',
+                              'create_at':int(time.time()*1000),'message':'/diag report '+task['id']})
+                messages.write_text(json.dumps(posts))
+                wait_for(lambda:any(p.get('root_id')=='report-query' for p in json.loads(messages.read_text())))
+                report = next(p for p in json.loads(messages.read_text()) if p.get('root_id')=='report-query')
+                self.assertIn('Bash failed: missing file', report['message'])
+                self.assertNotIn('do-not-send', report['message'])
+                self.assertIsNone(diag.poll())
             finally:
                 for process in (router,diag):
                     if process.poll() is None:process.terminate()

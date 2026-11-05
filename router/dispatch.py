@@ -114,14 +114,14 @@ class PlanningQueue:
                     paused = self.store.meta('project_paused:'+task['project_id'],False)
                     alert = ('需要处理：'+task['project_id']+' / '+task['id']+' / '+task['status']+
                              '\n项目暂停：'+str(bool(paused))+'；同项目等待任务数：'+str(len(queued))+
-                             '\n完整诊断与证据已保存在本机，索引为任务编号。'+
+                             '\n脱敏报告：/diag report '+task['id']+
                              '\n失败任务不会自动重跑。确认后可用 /router project-resume '+task['project_id']+' 恢复等待任务调度。')
                     self._notice(row,alert,'attention:'+task['id'])
                 if not tasks or any(t is None or t['status'] not in terminal for t in tasks):continue
                 lines=['跨项目汇总报告：'+row['id']]
                 for task in tasks:
                     lines.append('\n'+task['project_id']+' / '+task['id']+' / '+task['status'])
-                    lines.append('团队报告与独立验收证据已保存，本机索引：'+task['id'])
+                    lines.append('脱敏报告与工具报错：/diag report '+task['id'])
                 self._notice(row,'\n'.join(lines)[:40000],'report')
                 self.store.db.execute("UPDATE planning SET reported=1,status='completed' WHERE id=?",(row['id'],))
                 count+=1

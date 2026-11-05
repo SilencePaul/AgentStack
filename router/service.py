@@ -44,7 +44,7 @@ class Router:
             if len(pieces)<3:raise ValueError('用法：/router show 任务ID')
             t=self.store.get(pieces[2])
             if not t:raise ValueError('找不到该任务')
-            if reply_to:return f"项目 {t['project_id']}\n任务 {t['id']}\n状态 {t['status']}\n完整报告和证据已保存在本机。"
+            if reply_to:return f"项目 {t['project_id']}\n任务 {t['id']}\n状态 {t['status']}\n通过 /diag report {t['id']} 查询脱敏报告和工具报错。"
             return f"{t['id']} / {t['project_id']} / {t['status']}\n目标：{t['goal']}\n{t.get('summary') or '尚无完成报告'}"
         return '/router projects\n/router run 项目ID 目标\n/router status\n/router show 任务ID\n/router pause\n/router resume'
     def summary(self):
