@@ -12,7 +12,7 @@ from .mm import TransportRejected
 def terminal_report(task):
     """Public notifications contain deterministic supervisor fields only."""
     descriptions = {
-        'succeeded': 'Configured independent acceptance checks passed.',
+        'succeeded': 'Configured file checks passed. Business acceptance requires independent review.',
         'failed': 'NEEDS ATTENTION: execution or acceptance checks failed.',
         'timed_out': 'NEEDS ATTENTION: execution exceeded its deadline.',
         'interrupted': 'NEEDS ATTENTION: execution was interrupted.',
@@ -25,8 +25,7 @@ def terminal_report(task):
     text = ('Router task: ' + fields['task_id'] + '\nProject: ' + fields['project_id'] +
             '\nStatus: ' + status + '\n' + fields['description'] +
             '\nFull reports and evidence: ' + fields['evidence_reference'])
-    if status != 'succeeded':
-        text += '\nIssue remains open; no automatic rerun.'
+    text += '\nIssue remains open; no automatic rerun.'
     return fields, text
 
 
@@ -186,15 +185,10 @@ class MulticaPoller:
                     raise RuntimeError('Writeback workspace mismatch')
                 if self._fingerprint(current) != intent['fingerprint']:
                     raise RuntimeError('Issue changed during execution; refusing stale completion')
-                own_close_retry = self.store.meta(key) == 'closing' and task['status'] == 'succeeded'
-                if current.get('status') != 'in_progress' and not (current.get('status') == 'done' and own_close_retry):
+                if current.get('status') != 'in_progress':
                     raise RuntimeError('Issue status changed outside router; refusing writeback')
-                if not own_close_retry:
-                    self.store.set_meta(key, 'pending')
+                self.store.set_meta(key, 'pending')
                 self.client.comment(self.workspace, iid, summary, 'mc-result:' + task['id'])
-                if task['status'] == 'succeeded':
-                    self.store.set_meta(key, 'closing')
-                    self.client.status(self.workspace, iid, 'done')
                 self.store.set_meta(key, 'sent')
             except Exception as exc:
                 if isinstance(exc, TransportRejected):

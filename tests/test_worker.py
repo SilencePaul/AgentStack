@@ -136,5 +136,5 @@ class WorkerTests(unittest.TestCase):
                 result=w.poll()
                 if result:break
                 time.sleep(.02)
-            self.assertIsNotNone(result);self.assertTrue(w.result_summary.startswith(str(bindir)))
+            self.assertIsNotNone(result);self.assertEqual(Path(w.result_summary.split(os.pathsep)[0]).resolve(),bindir.resolve())
             self.assertEqual(os.environ.get('PATH'),before)

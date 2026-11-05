@@ -33,9 +33,11 @@ class PlanningQueue:
             else:
                 authorized = (isinstance(reply_to, dict) and bool(original_route.get('source_user_id'))
                     and reply_to.get('source_user_id') == original_route['source_user_id']
+                    and bool(original_route.get('root_id'))
+                    and reply_to.get('root_id') == original_route['root_id']
                     and reply_to.get('channel_id') == original_route.get('channel_id'))
             if not authorized:
-                raise ValueError('Clarification must come from the original user and channel')
+                raise ValueError('Clarification must come from the original user in the original thread')
             if source_key is not None:
                 previous = self.store.db.execute('SELECT id FROM planning WHERE source_key=?', (source_key,)).fetchone()
                 if previous:

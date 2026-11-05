@@ -124,7 +124,8 @@ class DispatchTests(unittest.TestCase):
         route={'channel_id':'c','source_user_id':'u','root_id':'root'}
         pid=self.queue.enqueue('Original complete requirements','original',route)
         self.queue.process_one(FakePlanner({'tasks':[],'clarification':'Which project?'}))
-        resumed=self.queue.clarify(pid,'Use a','reply',dict(route,root_id='new'))
+        with self.assertRaises(ValueError):self.queue.clarify(pid,'Use a','reply',dict(route,root_id='new'))
+        resumed=self.queue.clarify(pid,'Use a','reply',route)
         self.assertEqual(self.queue.clarify(pid,'Use a','reply',route),resumed)
         row=self.store.db.execute('SELECT goal,reply_to FROM planning WHERE id=?',(resumed,)).fetchone()
         self.assertIn('Original complete requirements',row['goal']);self.assertIn('Use a',row['goal'])

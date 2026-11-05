@@ -34,10 +34,17 @@ class Tests(unittest.TestCase):
     def test_final_acceptance_after_last_role(self):
         self.task['acceptance']={'files':[{'path':'answer.txt','equals':'yes'}]}
         w=self.worker();w.start()
-        for _ in range(3):self.assertIsNone(w.poll())
         (self.root/'answer.txt').write_text('yes')
+        for _ in range(3):self.assertIsNone(w.poll())
         self.assertEqual(w.poll()['status'],'succeeded')
         self.assertNotIn('acceptance',Child.instances[0].task)
+    def test_reviewer_cannot_create_developer_deliverable(self):
+        self.task['acceptance']={'files':[{'path':'answer.txt','equals':'yes'}]}
+        w=self.worker();w.start();w.poll()
+        (self.root/'answer.txt').write_text('yes')
+        self.assertEqual(w.poll()['status'],'failed')
+        self.assertEqual(len(Child.instances),2)
+
     def test_failure_stops_pipeline(self):
         Child.status='failed';w=self.worker();w.start()
         self.assertEqual(w.poll()['status'],'failed');self.assertEqual(len(Child.instances),1)

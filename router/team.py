@@ -36,6 +36,7 @@ class TeamWorker:
         self.sequence = 0
         self.clean_retries = 0
         self.started = None
+        self.protected_stamp = None
 
     def _event(self, kind, detail):
         try:
@@ -60,6 +61,8 @@ class TeamWorker:
             self.checks = Checks(prompt, self.task['project']['path'], self.run_dir)
             continuation=self.task.get('continuation')
             if continuation:
+                if "remaining_seconds" in continuation:
+                    self.deadline = min(self.deadline, self.started + continuation["remaining_seconds"])
                 if workspace_stamp(self.task['project']['path'])!=continuation['workspace']:
                     raise ValueError('Workspace changed since checkpoint; inspect changes before a new task')
                 self.index=continuation['index']
@@ -68,9 +71,19 @@ class TeamWorker:
                 self.round=continuation.get('round',0)
                 self.sequence=continuation.get('sequence',len(self.reports))
                 self.clean_retries=continuation.get('clean_retries',0)
+            if continuation and self.index in (1, 2, 3, 5):
+                self.protected_stamp = continuation.get("protected_stamp") or self._snapshot()
+                if self.protected_stamp != self._snapshot():
+                    raise ValueError("Protected files changed since checkpoint")
             self._start_role()
         except Exception as exc:
             self._finish('failed', 'Team initialization failed: ' + str(exc))
+
+    def _snapshot(self):
+        root = self.checks.root
+        git_project = any((parent / '.git').exists() for parent in (root, *root.parents))
+        return {'git': workspace_stamp(root) if git_project else None,
+                'files': self.checks.fingerprints()}
 
     def _start_role(self):
         remaining = self.deadline - time.monotonic()
@@ -148,6 +161,9 @@ class TeamWorker:
             if result is None:
                 return None
             role = self.ROLES[self.index][0]
+            if role in ('reviewer', 'tester', 'lead-report', 'lead-triage'):
+                if self._snapshot() != self.protected_stamp:
+                    return self._finish('failed', role + ': protected workspace changed during read-only verification')
             raw = getattr(self.child, 'result_summary', None) or result.get('summary', '')
             terminal = raw.strip().splitlines()[-1] if raw.strip() else ''
             marker = 'ROUTER_REVIEW' if role == 'reviewer' else 'ROUTER_TEST'
@@ -182,7 +198,9 @@ class TeamWorker:
                 checkpoint={**receipt,'question_id':uuid.uuid4().hex[:12], 'index':self.index,
                     'reports':self.reports,'answers':answers,'checks_before':self.checks.before,
                     'round':self.round,'sequence':self.sequence,'clean_retries':self.clean_retries,'team_protocol':self.protocol,
-                    'workspace':workspace_stamp(self.task['project']['path'])}
+                    'workspace':workspace_stamp(self.task['project']['path']),
+                    'protected_stamp':self.protected_stamp,
+                    'remaining_seconds':max(0, self.deadline - time.monotonic())}
                 self._write('checkpoint.json',checkpoint)
                 self._finish('waiting_input',receipt['question'])
                 self.result['checkpoint']=checkpoint
@@ -221,10 +239,14 @@ class TeamWorker:
                 if terminal != marker + ': PASS':
                     status = 'failed'
                     return self._finish(status, role + ' did not provide a passing terminal verdict.\n' + result.get('summary', ''))
+            if role == 'developer':
+                self.protected_stamp = self._snapshot()
+                self._write('developer-snapshot.json', self.protected_stamp)
             self.index += 1
             if self.index < 4:
                 self._start_role()
                 return self.result
+            self._write('final-snapshot.json', self.protected_stamp)
             checks = self.checks.evaluate()
             self._write('verification.json', {'before': self.checks.before, 'after': checks})
             status = ('succeeded' if all(ok for ok, _ in checks) else 'failed') if checks else 'reported_unverified'

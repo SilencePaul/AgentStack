@@ -1,4 +1,5 @@
 """Deterministic acceptance checks from the user's prompt, never model claims."""
+import hashlib
 import json
 from pathlib import Path, PureWindowsPath
 import re
@@ -69,6 +70,20 @@ class Checks:
             return ok, '内容符合条件' if ok else '内容不匹配'
         except (OSError, UnicodeError, ValueError):
             return False, '无法核验（路径不可访问、越界或不是 UTF-8 文本）'
+
+    def fingerprints(self):
+        result = {}
+        for rule in self.files:
+            path = self.path(rule['path'])
+            value = 'directory' if path.is_dir() else 'absent'
+            if path.is_file():
+                digest = hashlib.sha256()
+                with path.open('rb') as handle:
+                    for chunk in iter(lambda: handle.read(65536), b''):
+                        digest.update(chunk)
+                value = digest.hexdigest()
+            result[rule['path']] = value
+        return result
 
     def evaluate(self):
         results = []

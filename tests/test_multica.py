@@ -38,7 +38,8 @@ class Tests(unittest.TestCase):
         with self.assertRaises(RuntimeError):self.adapter.flush_writebacks()
         self.assertEqual(self.issue['status'],'in_progress')
         self.client.comment.side_effect=None
-        self.adapter.flush_writebacks();self.assertEqual(self.issue['status'],'done')
+        self.adapter.flush_writebacks();self.assertEqual(self.issue['status'],'in_progress')
+        self.assertIn('Business acceptance',self.client.comment.call_args.args[2])
         self.adapter.poll();self.assertEqual(len(self.store.tasks()),1)
     def test_unverified_leaves_open(self):
         self.adapter.poll();task=self.store.tasks()[0]

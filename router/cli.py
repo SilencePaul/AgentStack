@@ -130,6 +130,7 @@ def main():
     a=sub.add_parser('project-update');a.add_argument('id');a.add_argument('--rules');a.add_argument('--context');a.add_argument('--agents',help='Directory containing agents.json and role SOUL.md/AGENT.md')
     sub.add_parser('status');sub.add_parser('projects');sub.add_parser('stop')
     a=sub.add_parser('show');a.add_argument('id')
+    a=sub.add_parser('verify');a.add_argument('id');a.add_argument('--script',required=True);a.add_argument('--sha256',required=True);a.add_argument('--timeout',type=int,default=600)
     a=sub.add_parser('answer');a.add_argument('id');a.add_argument('question_id');a.add_argument('text')
     a=sub.add_parser('serve');a.add_argument('--once',action='store_true')
     args=p.parse_args();runtime=Path(args.runtime).resolve();runtime.mkdir(parents=True,exist_ok=True)
@@ -137,7 +138,13 @@ def main():
     store=Store(runtime/'router.sqlite3',common_rules=rules)
     router=Router(store)
     try:
-        if args.action=='answer':
+        if args.action=='verify':
+            from .business import verify
+            receipt=verify(store.get(args.id),args.script,args.sha256,args.timeout)
+            store.event(args.id,'business_verification',receipt)
+            print(json.dumps(receipt,ensure_ascii=False,indent=2))
+            if not receipt['passed']:raise SystemExit(1)
+        elif args.action=='answer':
             task=store.get(args.id)
             if not task:raise ValueError('Unknown task')
             store.answer(args.id,args.question_id,args.text,store.question_route(task))

@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 import unittest
 from router.store import Store
 from router.service import Router
@@ -80,12 +81,15 @@ class ContinuityTests(unittest.TestCase):
         w.child.result_summary='ROUTER_LEAD: PLAN';w.poll()
         w.child.result_summary='developer done';w.poll()
         w.child.result_summary='```router-receipt\n'+json.dumps({'status':'needs_input','question':'Choose?','completed':'Read diff','remaining':'Review'})+'\n```'
+        w.deadline = time.monotonic() + 15
         result=w.poll();self.assertEqual(result['status'],'waiting_input')
         self.assertEqual(result['checkpoint']['index'],1)
         self.store.wait_input(t['id'],result['checkpoint'],result['evidence'])
         self.store.answer(t['id'],result['checkpoint']['question_id'],'yes',self.route)
         t=self.store.claim()
         w2=TeamWorker(['fake'],t,self.root/'run2',lambda *a:None,Child);w2.start()
+        self.assertGreater(w2.deadline-w2.started, 0)
+        self.assertLessEqual(w2.deadline-w2.started, 15)
         self.assertIn('ROLE: reviewer',w2.child.task['goal'])
         self.assertIn('yes',w2.child.task['goal'])
         self.assertEqual(len(w2.reports),2)
