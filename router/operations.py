@@ -141,9 +141,10 @@ class Controller:
 
 
 class OperationsRouter:
-    def __init__(self, store, controller, business_db, admin=None):
+    def __init__(self, store, controller, business_db, admin=None, mock_commands=None):
         self.store, self.controller = store, controller
         self.admin = admin
+        self.mock_commands = mock_commands
         self.business = DiagnosticRouter(business_db)
         self.maintenance = DiagnosticRouter(Path(store.db.execute('PRAGMA database_list').fetchone()[2]))
 
@@ -152,6 +153,9 @@ class OperationsRouter:
             return self.business.handle(text, reply_to=reply_to)
         parts = text.strip().split(maxsplit=2)
         action = parts[1] if len(parts) > 1 else 'help'
+        if action == 'mock' and len(parts) == 3 and self.mock_commands:
+            identifier=self.mock_commands.enqueue(parts[2],source_key,reply_to)
+            return '模拟GitLab请求 '+identifier+' 已记录；结果回复本线程。'
         if self.admin:
             if action == 'skills':return '本次启动发现的可选skills：\n'+'\n'.join(sorted(self.admin.skills))
             if action == 'teams':
@@ -180,6 +184,9 @@ class OperationsRouter:
             return Router(self.store).handle('/router project-resume agentstack-maintenance', source_key, reply_to)
         return ('/ops status：维护状态\n/diag show 业务任务ID\n/diag report 业务任务ID [页码]\n'
                 '/ops teams：团队配置\n/ops skills：可用skills\n/ops configure 自然语言配置目标\n/ops config 配置ID\n/ops apply 配置ID\n/ops clarify 配置ID 补充说明\n'
+                '/ops mock create 项目 | open 项目 源分支 目标分支 | show MR | inspect MR（冲突诊断） | ci MR SHA passed/failed/pending | emit 规则 MR | check MR 任务 | merge MR HEAD BASE（仅本地mock）\n'
+                '/ops mock retry 规则 MR 失败任务ID：同版本显式重试，原失败保留；暂停项目需先/router project-resume 项目\n'
+                '/ops mock restart-receiver：仅重启本机HTTP接收线程，保留队列和正在执行的团队\n'
                 '/ops start | stop | restart：托管业务Router\n/ops repair 修复目标：独立维护编码\n'
                 '/ops show 维护任务ID\n/ops report 维护任务ID [页码]\n'
                 '/ops answer 维护任务ID 问题ID 答案\n/ops resume：检查失败后解除维护项目暂停（不重跑失败任务）')
@@ -222,7 +229,7 @@ def main():
             if item['state'] == 'executing':
                 controller.finish(key, item, '维护进程曾中断；此控制请求未重放，请检查实际Router状态。')
         from .admin import TeamAdmin, ConfigurationPlanner
-        from .webhooks import GitLabWebhook, server
+        from .webhooks import GitLabWebhook, WebhookListener
         from .worker import clean_environment
         import re
         inventory=subprocess.run([*config['qoder_command'],'skills','list','--all'],cwd=source,
@@ -231,8 +238,28 @@ def main():
         skills=set(re.findall(r'^(\S+) \[Enabled\]',inventory.stdout,re.M))
         if not skills:raise ValueError('No recognizable enabled Qoder skills')
         business=Store(Path(args.runtime)/'router.sqlite3',common_rules=store.common_rules)
+        from .mock_gitlab import MockGitLab
+        from .mock_commands import MockCommands
+        from .mock_review import MockReview
+        mock=MockGitLab(runtime/'mock-gitlab')
+        mock_review=MockReview(business,mock)
+        hook_secret=webhook_secret(runtime)
+        def emit_mock(rule_id,mr_id,route,retry_task=None):
+            from urllib.request import Request, urlopen
+            rule=business.meta('webhook:'+rule_id)
+            if not rule or any(rule['route'].get(k)!=route.get(k) for k in ('channel_id','source_user_id')):
+                raise ValueError('Mock events require the configured MM owner/channel')
+            event=mock.event(mr_id)
+            if retry_task:event['mock_retry_task']=retry_task
+            request=Request('http://127.0.0.1:'+str(args.webhook_port)+'/hooks/gitlab/'+rule_id,
+                            data=json.dumps(event).encode(),method='POST',
+                            headers={'Content-Type':'application/json','X-Gitlab-Token':hook_secret,'X-Gitlab-Event':'Merge Request Hook'})
+            with urlopen(request,timeout=35) as response:return json.load(response)
+        listener=WebhookListener(('127.0.0.1',args.webhook_port),GitLabWebhook(business,hook_secret,mock_review))
+        mock_commands=MockCommands(store,mock,emit=emit_mock,check=mock_review.check,restart_receiver=listener.restart)
+        mock_commands.recover()
         admin=TeamAdmin(store,business,args.projects_root,runtime/'profiles',
-                        ConfigurationPlanner(config['qoder_command'],runtime/'config-plans',config.get('maintenance_model','Auto'),stopping,skills),skills)
+                        ConfigurationPlanner(config['qoder_command'],runtime/'config-plans',config.get('maintenance_model','Auto'),stopping,skills),skills,mock=mock)
         # In-flight application is never replayed after a crash. Its partial
         # checkout/config stays available for inspection.
         with store.transaction():
@@ -240,10 +267,8 @@ def main():
                 item=json.loads(row[1])
                 if item['state'] in ('planning','applying'):
                     store.set_meta(row[0],{**item,'state':'failed','error':'Maintenance interrupted; inspect before a new draft'})
-        router = OperationsRouter(store, controller, Path(args.runtime)/'router.sqlite3',admin)
-        hook_server=server(('127.0.0.1',args.webhook_port),GitLabWebhook(business,webhook_secret(runtime)))
-        hook_thread=threading.Thread(target=hook_server.serve_forever,daemon=True)
-        hook_thread.start()
+        router = OperationsRouter(store, controller, Path(args.runtime)/'router.sqlite3',admin,mock_commands)
+        listener.start()
         settings = config['mm']
         client = AiCrew(settings['script'], settings['base'], cancel_event=stopping)
         poller = Poller(client, store, router, settings['channels'], settings['allowed_user_ids'], settings['bot_id'],
@@ -267,6 +292,7 @@ def main():
         def configuration():
             while not stopping.is_set():
                 admin.tick()
+                mock_commands.tick()
                 stopping.wait(.5)
         config_thread=threading.Thread(target=configuration,daemon=True)
         config_thread.start()
@@ -283,10 +309,11 @@ def main():
             scheduler.shutdown()
             thread.join(timeout=20)
             config_thread.join(timeout=20)
-            hook_server.shutdown();hook_server.server_close();hook_thread.join(timeout=5)
+            listener.stop()
             store.set_meta('service_heartbeat', 'stopped')
             store.close()
             business.close()
+            mock.close()
 
 
 def webhook_secret(runtime):

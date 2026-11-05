@@ -27,7 +27,7 @@ class ConfigurationPlanner:
         directory.mkdir(parents=True)
         prompt = ('Translate the user request into ONE configuration JSON object, no markdown. Do not execute tools. '
                   'If insufficient or unsupported return {"clarification":"one concise Chinese question"}. '
-                  'Supported team schema: {"kind":"team","id":"slug","repository":"empty OR HTTPS/SSH git URL",'
+                  'Supported team schema: {"kind":"team","id":"slug","repository":"empty OR HTTPS/SSH git URL OR registered mock://slug",'
                   '"rules":"project rules","roles":{"developer":{"skills":["agentstack-implement"],"instructions":"additional role instructions"}}}. '
                   'Slots: leader, developer, reviewer, tester. Roles may be empty for defaults. Leader skills/tools must be empty. '
                   'Available skills: '+json.dumps(self.skills)+'. Role tools optional: Read,Glob,Grep,Skill,Bash,Edit,Write; '
@@ -49,8 +49,9 @@ class ConfigurationPlanner:
 
 
 class TeamAdmin:
-    def __init__(self, ops, business, projects_root, config_root, planner, skills=None):
+    def __init__(self, ops, business, projects_root, config_root, planner, skills=None, mock=None):
         self.ops, self.business, self.planner = ops, business, planner
+        self.mock = mock
         self.projects_root, self.config_root = Path(projects_root).resolve(), Path(config_root).resolve()
         self.skills = set(skills if skills is not None else SKILLS)
 
@@ -97,8 +98,12 @@ class TeamAdmin:
         if spec.get('kind')=='team':
             if set(spec)!={'kind','id','repository','rules','roles'}:raise ValueError('Invalid team fields')
             repo=spec['repository']
+            mock_repo = isinstance(repo,str) and repo.startswith('mock://')
+            if mock_repo:
+                if self.mock is None:raise ValueError('Mock registry is unavailable')
+                self.mock.project_number(repo[7:])
             if not isinstance(repo,str) or not (repo=='empty' or re.fullmatch(r'https://[A-Za-z0-9.-]+(?::[0-9]+)?/[A-Za-z0-9_./-]+',repo)
-                    or re.fullmatch(r'git@[A-Za-z0-9.-]+:[A-Za-z0-9_./-]+',repo)):
+                    or re.fullmatch(r'git@[A-Za-z0-9.-]+:[A-Za-z0-9_./-]+',repo) or mock_repo):
                 raise ValueError('Repository must be a credential-free HTTPS/SSH URL or explicit empty demo')
             if not isinstance(spec['rules'],str) or len(spec['rules'])>4000:raise ValueError('Invalid rules')
             if not isinstance(spec['roles'],dict) or set(spec['roles'])-SLOTS:raise ValueError('Invalid roles')
@@ -192,7 +197,8 @@ class TeamAdmin:
             if path.exists():raise ValueError('Project destination already exists; inspect before registering')
             if spec['repository']=='empty':path.mkdir()
             else:
-                result=subprocess.run(['git','clone','--',spec['repository'],str(path)],capture_output=True,timeout=180)
+                repository = str(self.mock.repository(spec['repository'][7:])) if spec['repository'].startswith('mock://') else spec['repository']
+                result=subprocess.run(['git','clone','--',repository,str(path)],capture_output=True,timeout=180)
                 if result.returncode:raise ValueError('Repository clone failed; check repository URL and machine Git credentials')
         with self.business.transaction():
             if expected_catalog and self.digest(self.catalog())!=expected_catalog:raise ValueError('团队配置已变化，请重新生成草案')

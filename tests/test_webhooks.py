@@ -25,6 +25,26 @@ class WebhookTests(unittest.TestCase):
         self.event['project']['id']=43
         with self.assertRaises(ValueError):self.hook.receive('mr','secret','Merge Request Hook',self.event)
         self.assertEqual(self.store.tasks(),[])
+
+    def test_receiver_restart_preserves_http_address_and_event_deduplication(self):
+        import json
+        from urllib.request import Request,urlopen
+        from router.webhooks import WebhookListener
+        listener=WebhookListener(('127.0.0.1',0),self.hook)
+        try:
+            listener.start();address=listener.address
+            def post():
+                request=Request('http://127.0.0.1:'+str(address[1])+'/hooks/gitlab/mr',
+                                data=json.dumps(self.event).encode(),
+                                headers={'X-Gitlab-Token':'secret','X-Gitlab-Event':'Merge Request Hook'})
+                with urlopen(request,timeout=5) as response:return json.load(response)
+            original=post()
+            result=listener.restart()
+            self.assertEqual(result['generation'],2)
+            self.assertEqual(listener.address,address)
+            self.assertEqual(post(),original)
+            self.assertEqual(len(self.store.tasks()),1)
+        finally:listener.stop()
     def test_new_commit_is_new_task_but_merge_event_is_ignored(self):
         self.hook.receive('mr','secret','Merge Request Hook',self.event)
         self.event['object_attributes'].update(action='update',last_commit={'id':'b'*40})

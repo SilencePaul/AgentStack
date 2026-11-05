@@ -142,6 +142,42 @@ class Tests(unittest.TestCase):
         self.assertEqual(len(w.reports),3)
         self.assertEqual(w.index,1)
 
+    def test_explicit_readonly_developer_retries_once_without_write_tools(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        self.task['project']['review_only']=True
+        w=self.worker()
+        with patch.object(w,'_snapshot',return_value={'git':{'sha256':'stable'},'files':{}}):
+            w.start();deadline=w.deadline
+            self.assertNotIn('Edit',w.child.task['role_tools'])
+            self.assertNotIn('Write',w.child.task['role_tools'])
+            for attempt in range(2):
+                w.child.runtime_evidence=SimpleNamespace(tool_errors=1,permission_denials=0)
+                w.child.poll=lambda:{'status':'failed','process_exit_code':0,'summary':'query failed'}
+                result=w.poll()
+                if attempt==0:self.assertIsNone(result)
+            self.assertEqual(result['status'],'failed')
+            self.assertEqual(w.clean_retries,1)
+            self.assertEqual(w.deadline,deadline)
+            self.assertEqual(len(w.reports),2)
+
+    def test_readonly_developer_change_is_fatal_before_retry(self):
+        from unittest.mock import patch
+        self.task['project']['review_only']=True
+        w=self.worker()
+        with patch.object(w,'_snapshot',return_value={'git':{'sha256':'stable'},'files':{}}) as snapshot:
+            w.start();snapshot.return_value={'git':{'sha256':'changed'},'files':{}}
+            self.assertEqual(w.poll()['status'],'failed')
+            self.assertEqual(w.clean_retries,0)
+
+    def test_mutating_developer_is_not_automatically_retried(self):
+        from types import SimpleNamespace
+        w=self.worker();w.start()
+        w.child.runtime_evidence=SimpleNamespace(tool_errors=1,permission_denials=0)
+        w.child.poll=lambda:{'status':'failed','process_exit_code':0,'summary':'query failed'}
+        self.assertEqual(w.poll()['status'],'failed')
+        self.assertEqual(w.clean_retries,0)
+
     def test_no_retry_permission_or_process_error(self):
         from types import SimpleNamespace
         for denial,code in ((1,0),(0,1)):
@@ -286,3 +322,100 @@ class Tests(unittest.TestCase):
             with patch.object(w,'_snapshot',return_value={'stable':variant!='changed'}):
                 self.assertEqual(w.poll()['status'],'failed')
             self.assertEqual(w.leader_protocol_retries,0)
+
+    def test_readonly_receipt_format_retry_preserves_failure_and_requires_new_pass(self):
+        from types import SimpleNamespace
+        w=self.worker();w.start();w.poll();deadline=w.deadline
+        w.child.runtime_evidence=SimpleNamespace(tool_errors=0,permission_denials=0)
+        w.child.poll=lambda:{'status':'reported_unverified','process_exit_code':0,'summary':'```router-receipt\n{"status":"pass"}\n```\nROUTER_REVIEW: PASS'}
+        self.assertIsNone(w.poll())
+        self.assertEqual(w.index,1)
+        self.assertEqual(w.clean_retries,1)
+        self.assertEqual(w.reports[-1]['failure_kind'],'invalid_question_receipt')
+        self.assertIsNone(w.reports[-1]['verdict'])
+        self.assertNotIn('{"status":"pass"}',w.child.task['goal'])
+        self.assertIn('OUTPUT CONTRACT RETRY',w.child.task['goal'])
+        self.assertIsNone(w.poll())
+        self.assertEqual(w.index,2)
+        self.assertEqual(w.deadline,deadline)
+
+    def test_readonly_receipt_format_retry_is_bounded(self):
+        from types import SimpleNamespace
+        w=self.worker();w.start();w.poll()
+        for attempt in range(2):
+            w.child.runtime_evidence=SimpleNamespace(tool_errors=0,permission_denials=0)
+            w.child.poll=lambda:{'status':'reported_unverified','process_exit_code':0,'summary':'```router-receipt\n{}\n```'}
+            result=w.poll()
+            if attempt==0:self.assertIsNone(result)
+        self.assertEqual(result['status'],'failed')
+        self.assertEqual(w.clean_retries,1)
+        self.assertEqual(w.index,1)
+
+    def test_corrected_receipt_still_waits_for_human_and_preserves_retry_budget(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        with patch('router.team.workspace_stamp',return_value={'stamp':'stable'}):
+            w=self.worker();w.start();w.poll()
+            w.child.runtime_evidence=SimpleNamespace(tool_errors=0,permission_denials=0)
+            w.child.poll=lambda:{'status':'reported_unverified','process_exit_code':0,'summary':'```router-receipt\n{}\n```'}
+            self.assertIsNone(w.poll())
+            w.child.poll=lambda:{'status':'reported_unverified','process_exit_code':0,'summary':'```router-receipt\n{"status":"needs_input","question":"Scope?","completed":"Reviewed","remaining":"Wait"}\n```'}
+            result=w.poll()
+            self.assertEqual(result['status'],'waiting_input')
+            self.assertEqual(result['checkpoint']['clean_retries'],1)
+            self.assertEqual(result['checkpoint']['index'],1)
+
+    def test_receipt_format_retry_never_replays_mutating_role_or_denied_tools(self):
+        from types import SimpleNamespace
+        for developer,errors,denials in ((True,0,0),(False,1,0),(False,0,1)):
+            w=TeamWorker(['fake'],self.task,self.root/str((developer,errors,denials)),lambda *a:None,Child)
+            w.start()
+            if not developer:w.poll()
+            w.child.runtime_evidence=SimpleNamespace(tool_errors=errors,permission_denials=denials)
+            w.child.poll=lambda:{'status':'reported_unverified','process_exit_code':0,'summary':'```router-receipt\n{}\n```'}
+            self.assertEqual(w.poll()['status'],'failed')
+            self.assertEqual(w.clean_retries,0)
+
+    def test_leader_can_correct_malformed_receipt_without_granting_completion(self):
+        from types import SimpleNamespace
+        self.task.pop('team_protocol');w=self.worker();w.start()
+        w.child.runtime_evidence=SimpleNamespace(calls={},tool_errors=0,permission_denials=0)
+        w.child.poll=lambda:{'status':'reported_unverified','process_exit_code':0,'summary':'```router-receipt\n{}\n```'}
+        self.assertIsNone(w.poll())
+        self.assertEqual(w.index,4)
+        self.assertEqual(w.leader_protocol_retries,1)
+        w.child.poll=lambda:{'status':'reported_unverified','process_exit_code':0,'summary':'ROUTER_LEAD: PLAN'}
+        self.assertIsNone(w.poll())
+        self.assertEqual(w.index,0)
+
+    def test_readonly_developer_can_correct_receipt_without_edit_tools(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        self.task['project']['review_only']=True
+        w=self.worker()
+        with patch.object(w,'_snapshot',return_value={'git':{'head':'fixture'},'files':{}}):
+            w.start()
+            w.child.runtime_evidence=SimpleNamespace(tool_errors=0,permission_denials=0)
+            w.child.poll=lambda:{'status':'reported_unverified','process_exit_code':0,'summary':'```router-receipt\n{}\n```'}
+            self.assertIsNone(w.poll())
+            self.assertEqual(w.index,0)
+            self.assertEqual(w.clean_retries,1)
+            self.assertNotIn('Edit',w.child.task['role_tools'])
+            self.assertNotIn('Write',w.child.task['role_tools'])
+            self.assertIsNone(w.poll())
+            self.assertEqual(w.index,1)
+
+    def test_receipt_format_retry_respects_workspace_model_async_and_deadline(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        for variant in ('workspace','model','async','deadline'):
+            w=TeamWorker(['fake'],self.task,self.root/variant,lambda *a:None,Child)
+            with patch.object(w,'_snapshot',return_value={'stable':True}):
+                w.start();w.poll()
+            w.child.runtime_evidence=SimpleNamespace(tool_errors=0,permission_denials=0)
+            w.child.model_error=variant=='model';w.child.native_async_seen=variant=='async'
+            w.child.poll=lambda:{'status':'reported_unverified','process_exit_code':0,'summary':'```router-receipt\n{}\n```'}
+            if variant=='deadline':w.deadline=0
+            with patch.object(w,'_snapshot',return_value={'stable':variant!='workspace'}):
+                self.assertEqual(w.poll()['status'],'timed_out' if variant=='deadline' else 'failed')
+            self.assertEqual(w.clean_retries,0)

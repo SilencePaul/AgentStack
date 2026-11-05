@@ -6,6 +6,19 @@ from router.admin import TeamAdmin
 
 
 class AdminTests(unittest.TestCase):
+    def test_mock_uri_clones_only_registered_mock_repository(self):
+        from router.mock_gitlab import MockGitLab
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);mock=MockGitLab(root/'mock');mock.create_project('source')
+            ops=Store(root/'ops');business=Store(root/'business')
+            try:
+                admin=TeamAdmin(ops,business,root/'projects',root/'configs',None,mock=mock)
+                admin.apply({'kind':'team','id':'team','repository':'mock://source','rules':'review only','roles':{}},{},'draft')
+                project=business.projects()[0]
+                self.assertEqual(project['repository'],'mock://source')
+                self.assertEqual(subprocess.run(['git','-C',project['path'],'status','--porcelain'],capture_output=True,text=True,check=True).stdout,'')
+            finally:ops.close();business.close();mock.close()
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
         self.ops=Store(self.root/'ops.db');self.business=Store(self.root/'business.db')

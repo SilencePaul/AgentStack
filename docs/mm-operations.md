@@ -44,3 +44,31 @@ Windows webhook secret 自动用当前用户 DPAPI 加密存入 OPS_RUNTIME/webh
 配置支持 leader/developer/reviewer/tester 四个槽位、本机已安装启用的 skills 和受支持的工具清单。自定义指令不授予操作系统隔离，也不能突破用户原始授权。维护 checkout 和业务代码分开，但 Bash 并非安全沙箱。
 
 当前 webhook 只实现 MR 评审路由，未实现 GitLab 自动合并、GitLab webhook 的远程注册、任意新 skill 安装或任意专家角色编排。自动合并需要单独实现并校验目标分支、精确 SHA、CI/审批状态和合并授权；不能只靠模型口头 PASS。配置会对不支持的请求要求澄清。
+
+## 纯 mock GitLab 的 MM 全流程
+
+`/ops mock create demo` 在维护 runtime 的隔离注册表创建本地 bare Git 仓库，返回 `mock://demo` 和模拟 project_id。通过 `/ops configure` 指定该 URI 创建团队，确认草案后实际克隆；不能借此克隆任意本机目录。模拟源分支和测试数据由测试夹具准备，不连接真实 GitLab。
+
+在 MM 创建对应 webhook 规则后，依次使用：
+
+```text
+/ops mock open demo feature main
+/ops mock ci MR_ID HEAD_SHA passed
+/ops mock emit RULE_ID MR_ID
+/ops mock check MR_ID TASK_ID
+/ops mock merge MR_ID HEAD_SHA BASE_SHA
+```
+
+emit 经本机 HTTP 接收线程派单，返回任务 ID。团队工作区必须干净且空闲，接收器抓取注册表的提交并以 detached HEAD 检出。输入明确携带源、目标精确 SHA，不能使用陈旧本地分支或查询不存在的 upstream。重复事件返回原任务；新源/目标 SHA 绑定新的核对任务。
+
+check 校验真实终态任务、reviewer/tester 的 PASS 与退出状态、最终工作区快照、干净工作区和当前源/目标 SHA，并独立执行 Git diff 检查，才登记版本绑定的核对记录。它不替代业务自动化测试；测试仍由团队执行并由联调验收独立复跑。merge 要求精确 SHA、同版本 CI 和核对记录通过，并通过 Git 原子引用事务更新模拟目标分支。重复合并返回已有结果，不重复创建合并。
+
+`/ops mock show MR_ID` 查看已记录状态；`/ops mock inspect MR_ID` 刷新当前版本并诊断冲突文件。inspect 不授予批准、不合并、不移动分支。真实 GitLab 没有这套模拟 CI 或合并能力。
+
+失败任务不会因重复投递而重跑。处理原因后，在 MM 对已暂停的项目执行 `/router project-resume TEAM_ID`，再显式发 `/ops mock retry RULE_ID MR_ID FAILED_TASK_ID`。只允许重试绑定同一 MR、团队及精确版本的失败任务；新任务保留 `retry_of`，原失败证据不变，同一重试请求仍去重。源或目标已经变化时应重新 emit 当前版本。
+
+模拟命令队列先落盘再执行，结果发回命令线程；维护进程中断时，尚未确认效果的命令标为 interrupted，不盲目重放。凭据和 webhook secret 不出现在 MM 指令中。
+
+`/ops mock restart-receiver` 只关闭并重新绑定本机 HTTP 接收线程，返回新的 generation。它不停止业务 Router、Qoder 任务或 MM 诊断；事件去重数据仍在原 SQLite 队列中。重启后可再次 emit 同一版本，确认返回原任务 ID。若重新绑定失败，错误仍通过独立 MM 通道返回，可排查端口后再次显式重启。
+
+`router-receipt` 仅用于 `needs_input` 问答，成功报告使用角色规定的末行判定。若只读评审/测试在工具正常结束后输出了错误格式，监督器保留失败报告，并在工作区未变化时最多重新执行一次该阶段；与工具错误重试共用额度，不延长任务时限。纠正后的合法问题仍需等待原作者在原线程回答。写代码阶段、权限拒绝、工作区变化或重复错误不会套用这条格式重试路径。

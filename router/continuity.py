@@ -13,6 +13,8 @@ Do not include secrets in the question. The closing fence must be alone on its l
 Put any explanation before the receipt; output nothing after it. Never combine needs_input with
 PASS/BLOCKED verdicts or instructions to keep executing. Exit normally and wait for the human answer.
 This is NOT completion.
+The router-receipt fence is reserved exclusively for needs_input. Never use it
+for success/pass reports, test evidence, examples, or quoted historical receipts.
 Otherwise finish the assigned phase normally, preserving any required terminal PASS/BLOCKED marker.
 '''
 
