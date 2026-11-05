@@ -17,3 +17,11 @@
 ## Checks
 
 Unauthorized messages and unrelated channels are rejected by Poller. Duplicate messages cannot repeat a restart or task. Restart never kills an unowned PID. No raw credentials or reasoning in MM reports. Skill and tool inventories must match launch restrictions. Repair tasks have a separate workspace/runtime and cannot deploy themselves.
+
+## Scope extension and verification ledger
+
+User additionally requested MM-authored teams/rules/skills and webhook routing, and selected a simulated GitLab MR first. Added tool-free configuration drafting with same-thread owner confirmation; approved drafts are versioned. Added loopback authenticated MR ingress, exact-SHA deduplication and MM notification. Auto-merge and remote GitLab hook registration remain explicit unsupported operations pending separate credentials/policy implementation.
+
+Local automated suite: 175 tests passed. Real Qwen3.8-Flash configuration smoke completed all five phases with expected skills and restricted tools. MM confirmed business-down diagnostics, managed start, natural-language team draft/apply, webhook draft/apply, maintenance coding/report retrieval. Local HTTP repeated event returned one task; bad token returned403. Maintenance Qoder added exactly one test file in separate checkout; independent rerun passed3 tests. Remaining: live business checks/question continuation, final service reload and managed restart verification.
+
+Review fixes: transactional paused/shutdown check prevents claim/stop race; runtime overlap rejected before opening DB; stop no longer mutates paused; partial role updates preserve unspecified identity/rules/tools; webhook revision checked before update. Live startup uncovered inherited PSModulePath incompatibility; Windows DPAPI subprocess now uses default module search. Live delivery uncovered dot in control notice dedup key; transport-safe key regression added.

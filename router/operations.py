@@ -136,7 +136,7 @@ class Controller:
     def finish(self, key, item, text):
         with self.store.transaction():
             self.store.set_meta(key, {**item, 'state':'finished', 'result':text})
-            self.store.enqueue_notice(item['route'], text, key + ':result')
+            self.store.enqueue_notice(item['route'], text, key.replace('ops.action:', 'ops-action:') + ':result')
         self.pending = None
 
 
@@ -247,9 +247,12 @@ def main():
                     if client.get('/users/me').get('id') != settings['bot_id']:
                         raise ValueError('Operations bot identity mismatch')
                     poller.poll()
-                    deliver_pending(store, client, stopping)
+                    failures=deliver_pending(store, client, stopping)
+                    if failures:raise failures[0]
+                    store.set_meta('transport_health','connected')
                 except Exception as exc:
                     logging.warning('Operations transport: %s', type(exc).__name__)
+                    store.set_meta('transport_health','error:'+type(exc).__name__)
                 stopping.wait(2)
         thread = threading.Thread(target=network, daemon=True)
         thread.start()
@@ -287,9 +290,11 @@ def webhook_secret(runtime):
                 "$v=[Guid]::NewGuid().ToString('N')+[Guid]::NewGuid().ToString('N'); "
                 "$s=ConvertTo-SecureString $v -AsPlainText -Force; $s | Export-Clixml -LiteralPath $p}; "
                 "[System.Net.NetworkCredential]::new('', $s).Password")
-        result=subprocess.run(['powershell','-NoProfile','-NonInteractive','-Command',script],capture_output=True,text=True,timeout=15)
+        # Windows PowerShell cannot load PowerShell 7's inherited module path.
+        env={k:v for k,v in os.environ.items() if k.upper()!='PSMODULEPATH'}
+        result=subprocess.run(['powershell','-NoProfile','-NonInteractive','-Command',script],capture_output=True,timeout=15,env=env)
         if result.returncode:raise RuntimeError('Cannot access encrypted webhook secret')
-        return result.stdout.strip()
+        return result.stdout.decode('ascii').strip()
     import secrets
     path=runtime/'webhook-secret'
     try:

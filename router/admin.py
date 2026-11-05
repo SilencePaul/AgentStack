@@ -6,10 +6,12 @@ import re
 import shutil
 import subprocess
 import uuid
+import copy
 
 from .profiles import load_profiles, ROLE_TOOLS, SLOTS
 
 SKILLS = {'agentstack-implement', 'agentstack-review', 'verify', 'debug'}
+UNSET = object()
 
 
 class ConfigurationPlanner:
@@ -128,11 +130,13 @@ class TeamAdmin:
                 catalog=self.catalog()
                 spec=self.planner(item['goal'],catalog);self.validate(spec)
                 item.update(spec=spec,state='needs_input' if 'clarification' in spec else 'draft',catalog_digest=self.digest(catalog))
+                if spec.get('kind')=='webhook':
+                    item['expected_hook']=(self.business.meta('webhook:'+spec['id']) or {}).get('revision')
                 text=spec.get('clarification') or ('配置草案（尚未生效）：\n'+json.dumps(spec,ensure_ascii=False,indent=2)+'\n确认：/ops apply '+identifier)
                 text+='\n补充或修改：/ops clarify '+identifier+' 说明'
             else:
                 if self.digest(self.catalog())!=item['catalog_digest']:raise ValueError('团队配置已变化，请重新生成草案后确认')
-                self.apply(item['spec'],item['route'],identifier)
+                self.apply(item['spec'],item['route'],identifier,expected_catalog=item['catalog_digest'],expected_hook=item.get('expected_hook'))
                 item['state']='applied';text='配置已生效：'+item['spec']['id']+'。只影响后续任务，已有任务保留原配置快照。'
             self.ops.set_meta(key,item)
             self.ops.enqueue_notice(item['route'],text,key+':'+item['state'])
@@ -145,10 +149,14 @@ class TeamAdmin:
     def digest(value):
         return hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
 
-    def apply(self, spec, route, identifier):
+    def apply(self, spec, route, identifier, expected_catalog=None, expected_hook=UNSET):
         self.validate(spec)
         if spec['kind']=='webhook':
-            self.business.set_meta('webhook:'+spec['id'],{**spec,'route':route,'revision':identifier})
+            with self.business.transaction():
+                current=(self.business.meta('webhook:'+spec['id']) or {}).get('revision')
+                if expected_hook is not UNSET and current!=expected_hook:raise ValueError('Webhook规则已变化，请重新生成草案')
+                if expected_catalog and self.digest(self.catalog())!=expected_catalog:raise ValueError('团队配置已变化')
+                self.business.set_meta('webhook:'+spec['id'],{**spec,'route':route,'revision':identifier})
             return
         existing=next((p for p in self.business.projects() if p['id']==spec['id']),None)
         if existing and existing.get('repository')!=spec['repository']:
@@ -165,8 +173,17 @@ class TeamAdmin:
         (config/'agents.json').write_text(json.dumps(manifest,ensure_ascii=False),encoding='utf-8')
         profiles=load_profiles(config)
         if existing:
-            # Preserve omitted role profiles rather than resetting custom identities.
-            profiles={slot:(profiles[slot] if slot in spec['roles'] else existing.get('agent_profiles',{}).get(slot,profiles[slot])) for slot in SLOTS}
+            for slot in SLOTS:
+                previous=existing.get('agent_profiles',{}).get(slot)
+                if not previous:continue
+                profile=copy.deepcopy(previous)
+                settings=spec['roles'].get(slot,{})
+                for key in ('skills','tools'):
+                    if key in settings:profile[key]=settings[key]
+                if settings.get('instructions'):profile['agent']+='\n'+settings['instructions']+'\n'
+                profile.pop('digest',None)
+                profile['digest']=self.digest(profile)
+                profiles[slot]=profile
         else:
             self.projects_root.mkdir(parents=True,exist_ok=True)
             path=self.projects_root/spec['id']
@@ -175,8 +192,9 @@ class TeamAdmin:
             else:
                 result=subprocess.run(['git','clone','--',spec['repository'],str(path)],capture_output=True,timeout=180)
                 if result.returncode:raise ValueError('Repository clone failed; check repository URL and machine Git credentials')
-            self.business.add_project(spec['id'],path,model='Auto')
         with self.business.transaction():
+            if expected_catalog and self.digest(self.catalog())!=expected_catalog:raise ValueError('团队配置已变化，请重新生成草案')
+            if not existing:self.business.add_project(spec['id'],path,model='Auto')
             updated=self.business.update_project(spec['id'],rules=spec['rules'],agent_profiles=profiles)
             updated.update(repository=spec['repository'],config_revision=identifier)
             self.business.db.execute('UPDATE projects SET config=? WHERE id=?',(json.dumps(updated),spec['id']))

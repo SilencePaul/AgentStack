@@ -43,6 +43,11 @@ class OperationsTests(unittest.TestCase):
             self.router.handle('/ops restart', 'post', self.route)
         self.assertEqual(len(self.controller.actions()), 1)
 
+    def test_control_result_has_transport_safe_delivery_key(self):
+        import re
+        self.controller.finish('ops.action:abc',{'route':self.route},'done')
+        self.assertRegex(self.store.outbox_pending()[-1]['dedup_key'],r'^[A-Za-z0-9:_-]+$')
+
     def test_unowned_process_cannot_be_restarted(self):
         with self.assertRaisesRegex(ValueError, '托管'):
             self.controller.begin('restart')

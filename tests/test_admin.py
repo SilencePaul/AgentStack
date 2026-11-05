@@ -32,3 +32,21 @@ class AdminTests(unittest.TestCase):
     def test_webhook_cannot_enable_merge_without_policy_implementation(self):
         with self.assertRaises(ValueError):
             self.admin.validate({'kind':'webhook','id':'hook','team':'missing','project_id':1,'actions':['merge'],'mode':'auto-merge'})
+
+    def test_partial_role_update_keeps_identity_rules_and_tools(self):
+        spec={'kind':'team','id':'example','repository':'empty','rules':'r','roles':{}}
+        self.admin.apply(spec,self.route,'first')
+        profiles=self.business.projects()[0]['agent_profiles']
+        profiles['developer'].update(soul='custom soul',agent='custom rules',tools=['Read'],id='CUSTOM')
+        self.business.update_project('example',agent_profiles=profiles)
+        spec['roles']={'developer':{'skills':[]}}
+        self.admin.apply(spec,self.route,'second')
+        actual=self.business.projects()[0]['agent_profiles']['developer']
+        for key in ('soul','agent','tools','id'):self.assertEqual(actual[key],profiles['developer'][key])
+        self.assertEqual(actual['skills'],[])
+
+    def test_stale_hook_revision_cannot_overwrite_current_rule(self):
+        self.business.add_project('p',self.root)
+        spec={'kind':'webhook','id':'mr','team':'p','project_id':42,'actions':['open'],'mode':'review'}
+        self.admin.apply(spec,self.route,'v1')
+        with self.assertRaises(ValueError):self.admin.apply(spec,self.route,'v2',expected_hook=None)
