@@ -4,6 +4,19 @@ from router.store import Store
 from router.profiles import load_profiles
 
 class ProfileTests(unittest.TestCase):
+ def test_tools_are_validated_and_leader_cannot_enable_them(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   root=Path(tmp);self.make(root)
+   manifest=json.loads((root/'agents.json').read_text())
+   manifest['roles']['developer']['tools']=['Read','Bash','Edit','Write','Skill']
+   (root/'agents.json').write_text(json.dumps(manifest))
+   self.assertEqual(load_profiles(root)['developer']['tools'],['Read','Bash','Edit','Write','Skill'])
+   manifest['roles']['leader']=manifest['roles'].pop('developer')
+   (root/'agents.json').write_text(json.dumps(manifest))
+   with self.assertRaises(ValueError):load_profiles(root)
+   manifest['roles']['leader']['tools']=[]
+   (root/'agents.json').write_text(json.dumps(manifest))
+   self.assertEqual(load_profiles(root)['leader']['tools'],[])
  def make(self,root):
   (root/'dev').mkdir();(root/'dev'/'SOUL.md').write_text('Project {{PROJECT_NAME}}',encoding='utf-8')
   (root/'dev'/'AGENT.md').write_text('Implement within scope',encoding='utf-8')

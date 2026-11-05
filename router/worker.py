@@ -9,6 +9,7 @@ import time
 import uuid
 from .process_tree import ProcessTree
 from .diagnostics import tool_activity
+from .protocol import simulated_tool_markup
 from .verification import Checks, Evidence, render_report
 from pathlib import Path
 
@@ -44,7 +45,9 @@ class Worker:
         self.threads = []
         self.last_output = ''
         self.model_error = False
+        self.simulated_tool_markup_seen = False
         self.observed_skills = None
+        self.observed_tools = None
         self.result_summary = None
         self.tree = None
         self.runtime_evidence = Evidence()
@@ -81,6 +84,9 @@ class Worker:
                   'Do not treat the original authorization block as additional acceptance tests; the supervisor provides assigned-project checks.\n'
                   '\nORIGINAL USER AUTHORIZATION (immutable upper bound)\n' + str(self.task.get('original_user_goal') or self.task['goal']) +
                   '\n\nASSIGNED PHASE / PLANNING SUGGESTION (subordinate, not new authorization)\n' + self.task['goal'])
+        prompt += ('\nOUTPUT TRANSPORT CONTRACT: Use only the executor-native structured tool API for enabled tools. '
+                   'Never represent executable calls with tool_call/function/parameter XML in ordinary text. '
+                   'When tools are disabled, provide plain-text planning/reporting and the required phase verdict only.')
         (self.run_dir/'prompt.txt').write_text(prompt, encoding='utf-8')
         (self.run_dir/'task.json').write_text(json.dumps(self.task, ensure_ascii=False, indent=2), encoding='utf-8')
         try:
@@ -122,6 +128,8 @@ class Worker:
             args += ['--disallowed-tools', 'Agent']
         if self.task.get('tools_disabled'):
             args += ['--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}']
+        elif 'role_tools' in self.task:
+            args += ['--tools', ','.join(self.task['role_tools']) or '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}']
         if project.get('model'):
             args += ['--model', project['model']]
         self.started = self.progress = time.monotonic()
@@ -165,6 +173,11 @@ class Worker:
                     try:
                         event = json.loads(line)
                         if isinstance(event, dict):
+                            if event.get('type') == 'system' and event.get('subtype') == 'init':
+                                observed = event.get('tools')
+                                if isinstance(observed, list) and all(isinstance(item, str) for item in observed):
+                                    self.observed_tools = sorted(observed)
+                                    self._event('role_tools_loaded', {'tools':self.observed_tools})
                             if event.get('type') == 'system' and event.get('subtype') == 'init' and 'role_skills' in self.task:
                                 observed = event.get('skills')
                                 if isinstance(observed,list) and all(isinstance(item,str) for item in observed):
@@ -176,12 +189,18 @@ class Worker:
                                 self.native_async_seen = True
                             message = event.get('message', {})
                             blocks = message.get('content', []) if isinstance(message, dict) else []
+                            if self.task.get('tools_disabled') and event.get('type') == 'assistant' and isinstance(blocks, list):
+                                text = '\n'.join(block.get('text', '') for block in blocks
+                                                 if isinstance(block, dict) and block.get('type') == 'text')
+                                self.simulated_tool_markup_seen |= simulated_tool_markup(text)
                             if isinstance(blocks, list) and any(isinstance(block, dict) and block.get('type') == 'tool_use' and block.get('name') in ('Agent', 'TeamCreate') for block in blocks):
                                 self.native_async_seen = True
                             self._event('progress', {'type': event.get('type'), 'subtype': event.get('subtype'), 'session_id': self.session_id})
                         if isinstance(event, dict) and event.get('type') == 'result':
                             self.model_error = bool(event.get('is_error'))
                             self.result_summary = str(event.get('result', line))[-8000:]
+                            if self.task.get('tools_disabled'):
+                                self.simulated_tool_markup_seen |= simulated_tool_markup(str(event.get('result', '')))
                     except ValueError:
                         pass
                 self._event('output', {'stream': name, 'bytes': len(chunk)})
@@ -201,6 +220,8 @@ class Worker:
         self.result = {'status': status, 'summary': summary, 'session_id': self.session_id,
                        'process_exit_code': self.process.poll() if self.process else None, 'evidence': str(self.run_dir.resolve()),
                        'validation_warnings': self.runtime_evidence.validation_warnings}
+        if self.simulated_tool_markup_seen:
+            self.result['failure_kind'] = 'simulated_tool_markup'
         (self.run_dir/'result.json').write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
         self._event('finished', self.result)
         return self.result
@@ -215,8 +236,17 @@ class Worker:
             self.tree.close()
             for thread in self.threads:
                 thread.join(timeout=1)
+            if self.simulated_tool_markup_seen:
+                return self._finish('failed', '模型在禁用工具的阶段输出了模拟工具调用文本。'
+                                    '原始响应保存在 stdout.log；需要重新生成合法阶段回执。')
             if code == 0 and 'role_skills' in self.task and self.observed_skills != sorted(self.task['role_skills']):
                 return self._finish('failed', 'Qoder startup did not confirm the configured skill list; inspect stdout.log.')
+            if code == 0 and 'role_tools' in self.task:
+                # Qoder lists MCP dispatch wrappers even with an empty strict server
+                # config. These are metadata, not configured MCP capabilities.
+                wrappers = {'mcp_call', 'mcp_get', 'mcp_list'}
+                if self.observed_tools is None or set(self.observed_tools) - wrappers != set(self.task['role_tools']):
+                    return self._finish('failed', 'Qoder startup did not confirm configured built-in tools; inspect stdout.log.')
             status = self._verify() if code == 0 and not self.model_error else 'failed'
             model_text = self.result_summary or self.last_output or '(No model reply; see stdout.log and stderr.log)'
             summary, _ = render_report(model_text, code != 0 or self.model_error or self.native_async_seen, self.checks, self.runtime_evidence)

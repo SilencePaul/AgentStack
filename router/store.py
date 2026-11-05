@@ -143,6 +143,8 @@ class Store:
 
     def claim(self, limit=2):
         with self.transaction():
+            if self.meta('paused','0') == '1' or self.meta('shutdown','0') == '1':
+                return None
             if self.db.execute("SELECT COUNT(*) FROM tasks WHERE status='running'").fetchone()[0] >= limit:
                 return None
             row = self.db.execute("SELECT * FROM tasks t WHERE status='queued' AND NOT EXISTS (SELECT 1 FROM tasks r WHERE r.status IN ('running','waiting_input') AND r.project_id=t.project_id) ORDER BY rowid").fetchall()

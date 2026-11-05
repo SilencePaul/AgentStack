@@ -9,6 +9,35 @@ from router.worker import Worker
 from router.verification import Checks
 
 class WorkerTests(unittest.TestCase):
+    def test_disabled_tools_markup_is_failure_even_with_valid_final_plan(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            script = root/'fake.py'
+            response = '<tool_call>\n<function=Read>\n</function>\n</tool_call>\nROUTER_LEAD: PLAN'
+            script.write_text('import json\nprint(json.dumps('+repr({'type':'result','result':response})+'))', encoding='utf-8')
+            task = {'goal':'Plan only','tools_disabled':True,'project':{'path':str(root),'timeout':3}}
+            worker = Worker([sys.executable,str(script)],task,root/'run',lambda *a:None)
+            worker.start()
+            try:
+                until = time.monotonic()+4
+                while worker.poll() is None and time.monotonic()<until:
+                    time.sleep(.02)
+                self.assertEqual(worker.result['status'],'failed')
+                self.assertEqual(worker.result['failure_kind'],'simulated_tool_markup')
+                self.assertEqual(worker.runtime_evidence.calls,{})
+            finally:
+                worker.stop('cleanup')
+
+    def test_missing_command_diagnostic_remains_failure(self):
+        from router.verification import Evidence
+        evidence = Evidence()
+        evidence.observe({'type':'assistant','message':{'content':[{'type':'tool_use','id':'b','name':'Bash','input':{}}]}})
+        evidence.observe({'type':'user','message':{'content':[{'type':'tool_result','tool_use_id':'b','is_error':True,
+            'content':"Error: Bash tool parameter validation failed: params must have required property 'command'"}]}})
+        self.assertEqual(evidence.tool_errors,1)
+        self.assertEqual(len(evidence.parameter_errors),1)
+        self.assertEqual(evidence.validation_errors,0)
+
     def run_worker(self, script, **project):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)

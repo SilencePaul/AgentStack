@@ -40,3 +40,12 @@ python -X utf8 -m router.cli --runtime .runtime project-update 项目ID --agents
 省略 skills 时沿用 Qoder 的发现结果，空数组限定为零个 skill。有名称时仅保留列出的 skill，缺失或禁用的名称会阻止该角色启动。列表随任务配置保存，skill 本体由 Qoder 从本机安装或项目目录读取。更新配置后重新执行上面的 project-update 命令，新任务生效。
 
 每次启动前 Worker 以项目为工作目录读取 Qoder 目录，为该进程传入临时 --settings 过滤配置，并比对 stream-json 的 system/init.skills 实际名单。角色证据目录中的 stdout.log 可复核启动名单。skill 控制 Qoder 发现的工作方法，工具和项目权限由执行器单独配置。
+
+
+## 工具与 MM 配置
+
+roles 中可增加 tools 数组，支持 Read、Glob、Grep、Skill、Bash、Edit、Write。Leader 只能为空；评审和测试不允许 Edit/Write。配置通过 Qoder --tools 实施，并核对实际启动清单；严格 MCP 配置没有服务器，但 Qoder 仍会显示三个 MCP 分发包装器。Bash 仍是宿主命令执行能力，不能当作 OS 沙箱。
+
+示例 v2：开发加载 agentstack-implement；评审加载 agentstack-review；测试加载 verify；Leader 不加载 skill。将 examples/qoder-skills 下两个目录复制到用户的 .qoder/skills 后使用。
+
+独立维护入口启动后，可以通过 /ops configure 用自然语言创建团队、修改项目规则和角色配置。AI 返回草案，原发信人在原线程 /ops apply 配置ID 后生效。已有任务保留原版本。当前支持四个角色槽位以及本地已提供的四项 skills；未知能力会要求澄清，不会假装安装完成。

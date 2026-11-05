@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 
 SLOTS = {'leader','developer','reviewer','tester'}
+ROLE_TOOLS = {'Read', 'Glob', 'Grep', 'Bash', 'Edit', 'Write', 'Skill'}
 
 def load_profiles(directory):
     root = Path(directory).resolve(strict=True)
@@ -33,7 +34,7 @@ def load_profiles(directory):
         return result
     result={}
     for slot,entry in roles.items():
-        if not isinstance(entry,dict) or set(entry)-{'id','version','directory','skills'} or not {'id','version','directory'} <= entry.keys():
+        if not isinstance(entry,dict) or set(entry)-{'id','version','directory','skills','tools'} or not {'id','version','directory'} <= entry.keys():
             raise ValueError('Each role requires id, version and directory; skills is optional')
         for field in ('id','version'):
             if not isinstance(entry[field],str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}',entry[field]):
@@ -41,6 +42,13 @@ def load_profiles(directory):
         if not isinstance(entry['directory'],str):raise ValueError('Invalid profile directory')
         folder=root/entry['directory']
         profile={'id':entry['id'],'version':entry['version'],'soul':render(read(folder/'SOUL.md')),'agent':render(read(folder/'AGENT.md'))}
+        if 'tools' in entry:
+            tools = entry['tools']
+            if (not isinstance(tools, list) or not all(isinstance(t, str) and t in ROLE_TOOLS for t in tools)
+                    or len(set(tools)) != len(tools) or (slot == 'leader' and tools)
+                    or (slot in ('reviewer', 'tester') and set(tools) & {'Edit', 'Write'})):
+                raise ValueError('Invalid role tools; Leader has none; reviewer/tester cannot use Edit/Write')
+            profile['tools'] = list(tools)
         if 'skills' in entry:
             skills = entry['skills']
             if not isinstance(skills,list) or len(skills)>128 or not all(isinstance(name,str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}',name) for name in skills):

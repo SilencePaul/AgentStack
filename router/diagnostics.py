@@ -103,7 +103,7 @@ class DiagnosticRouter:
         query="SELECT id,kind,detail,CAST(strftime('%s',created_at) AS INTEGER) AS ts FROM events WHERE task_id=?"
         rows=list(db.execute(query+" AND kind IN ('role_started','role_finished','started') ORDER BY id DESC LIMIT 64",(task['id'],)))
         for role in ROLES:
-            for kind,limit in (('output',1),('tool_activity',32)):
+            for kind,limit in (('output',1),('tool_activity',32),('role_skills_loaded',1),('role_tools_loaded',1)):
                 rows+=list(db.execute(query+" AND kind=? AND json_extract(detail,'$.role')=? ORDER BY id DESC LIMIT ?",(task['id'],kind,role,limit)))
         lines=['','项目 '+safe_label(task['project_id'])+' / 任务 '+safe_label(task['id'])+'：'+safe_label(task['status'])]
         if task['status'] in ('queued','failed','interrupted','timed_out') and meta('project_paused:'+task['project_id'],False):lines.append('阻塞条件：项目被暂停；需要检查失败记录后显式恢复。')
@@ -130,6 +130,10 @@ class DiagnosticRouter:
             if info:line+='；PID='+safe_label(info.get('pid'))+'；session='+safe_label(info.get('session_id'))
             if began and not finished and not terminal:line+='；自阶段启动已过'+str(max(0,int(now-began)))+'秒'
             lines.append(line)
+            for kind, field, label in (('role_skills_loaded','skills','已加载skills'),('role_tools_loaded','tools','启动工具清单')):
+                inventory = next((d.get('detail',{}).get(field) for k,d,t in selected if k==kind), None)
+                if isinstance(inventory,list):
+                    lines.append('  '+label+'：'+(', '.join(safe_label(v) for v in inventory) or '无'))
             output=next((t for k,d,t in selected if k=='output'),None)
             if began and not finished and not terminal:
                 quiet=max(0,int(now-(output or began)))

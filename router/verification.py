@@ -102,6 +102,7 @@ class Evidence:
         self.validation_warnings = []
         self.calls = {}
         self.permission_denials = 0
+        self.parameter_errors = []
 
     def observe(self, event):
         if event.get('type') == 'result':
@@ -133,6 +134,10 @@ class Evidence:
                     self.validation_warnings.append({'tool_use_id': block.get('tool_use_id'), 'tool': 'Write', 'reason': 'required content missing; tool rejected before execution'})
                 else:
                     self.tool_errors += 1
+                    if (call.get('name') == 'Bash' and isinstance(inputs, dict)
+                            and 'command' not in inputs and block.get('content') ==
+                            "Error: Bash tool parameter validation failed: params must have required property 'command'"):
+                        self.parameter_errors.append('Bash 缺少 command，工具在参数校验阶段拒绝调用。')
 
 
 def render_report(model_text, execution_failed, checks, evidence):
@@ -152,6 +157,7 @@ def render_report(model_text, execution_failed, checks, evidence):
         lines.append("Pre-execution parameter validation warnings: " + str(evidence.validation_errors) + "; independent review, testing and acceptance are still required.")
     if evidence.tool_errors:
         lines.append('检测到工具错误：' + str(evidence.tool_errors) + ' 次（即使模型随后称成功，也需复核）。')
+        lines.extend(evidence.parameter_errors)
     if evidence.permission_denials:
         lines.append('检测到权限拒绝：' + str(evidence.permission_denials) + ' 次。')
     if results:

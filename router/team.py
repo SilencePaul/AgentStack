@@ -8,6 +8,7 @@ from pathlib import Path
 from .worker import Worker
 from .verification import Checks
 from .continuity import RECEIPT_INSTRUCTION, read_receipt, workspace_stamp
+from .protocol import simulated_tool_markup
 
 
 class TeamWorker:
@@ -35,6 +36,8 @@ class TeamWorker:
         self.round = 0
         self.sequence = 0
         self.clean_retries = 0
+        self.leader_protocol_retries = 0
+        self.leader_start_stamp = None
         self.started = None
         self.protected_stamp = None
 
@@ -71,6 +74,7 @@ class TeamWorker:
                 self.round=continuation.get('round',0)
                 self.sequence=continuation.get('sequence',len(self.reports))
                 self.clean_retries=continuation.get('clean_retries',0)
+                self.leader_protocol_retries=continuation.get('leader_protocol_retries',0)
             if continuation and self.index in (1, 2, 3, 5):
                 self.protected_stamp = continuation.get("protected_stamp") or self._snapshot()
                 if self.protected_stamp != self._snapshot():
@@ -91,6 +95,17 @@ class TeamWorker:
             self._finish('timed_out', 'Total team execution timeout')
             return
         role, instruction = self.ROLES[self.index]
+        if role.startswith('lead-'):
+            self.leader_start_stamp = self._snapshot()
+            instruction += ('\nThis phase has no executable tools. Express a plan or summarize recorded evidence only. '
+                            'Delegate requested filesystem or shell work to the developer/tester in prose. '
+                            'Never simulate tool calls or output tool_call/function/parameter XML wrappers. '
+                            'Do not claim a proposed action was executed.')
+        if self.leader_protocol_retries and role.startswith('lead-'):
+            instruction += ('\nOUTPUT CONTRACT RETRY: the previous response violated this phase output contract. '
+                            'Produce a fresh plain-text response. For lead-plan the final line must be exactly '
+                            'ROUTER_LEAD: PLAN. For lead-triage it must be ROUTER_LEAD: REWORK or ROUTER_LEAD: STOP. '
+                            'If essential user input is missing, use only the prescribed needs_input receipt.')
         slot = 'leader' if role.startswith('lead-') else role
         profile = self.task['project'].get('agent_profiles',{}).get(slot)
         if profile:
@@ -120,12 +135,20 @@ class TeamWorker:
         task['allow_native_teams'] = False
         task['supervisor_phase'] = True
         task['tools_disabled'] = role.startswith('lead-')
+        if profile and 'tools' in profile:
+            task['role_tools'] = [] if task['tools_disabled'] else list(profile['tools'])
         if profile and 'skills' in profile:
             task['role_skills'] = list(profile['skills'])
         task['project']['timeout'] = remaining
         # The original acceptance contract belongs to the supervisor only.
         original = re.sub(r'^```bridge-checks\s*\n.*?^```\s*$', '', self.task['goal'], flags=re.M | re.S)
-        prior = json.dumps([{**r,'summary':str(r.get('summary',''))[:6000]} for r in self.reports], ensure_ascii=False)
+        prior_reports = []
+        for report in self.reports:
+            summary = str(report.get('summary',''))[:6000]
+            if report.get('failure_kind') in ('simulated_tool_markup', 'invalid_leader_decision'):
+                summary = 'Previous response violated the output contract. See preserved role evidence.'
+            prior_reports.append({**report, 'summary':summary})
+        prior = json.dumps(prior_reports, ensure_ascii=False)
         continuation=self.task.get('continuation')
         handoff=json.dumps({k:continuation[k] for k in ('completed','remaining','answers','workspace')},ensure_ascii=False) if continuation else '{}'
         instruction+='\n'+RECEIPT_INSTRUCTION+'\nCHECKPOINT DATA (verify against files; new session, not native resume):\n'+handoff
@@ -145,10 +168,28 @@ class TeamWorker:
     def _finish(self, status, summary):
         self._write('receipt.json', {'task_id':self.task.get('id'),'attempt':self.task.get('attempt'), 'status':status, 'stage_index':self.index, 'verification':'independent_file_checks_only' if status=='succeeded' else 'not_verified', 'evidence':str(self.run_dir.resolve())})
         self.result = {'status': status, 'summary': summary, 'evidence': str(self.run_dir.resolve()), 'roles': self.reports,
-                       'rework_rounds': self.round, 'clean_retries': self.clean_retries}
+                       'rework_rounds': self.round, 'clean_retries': self.clean_retries,
+                       'leader_protocol_retries': self.leader_protocol_retries}
         self._write('result.json', self.result)
         self._event('finished', self.result)
         return self.result
+
+    def _retry_leader_protocol(self, role, result, reason):
+        runtime = getattr(self.child, 'runtime_evidence', None)
+        if (not role.startswith('lead-') or self.leader_protocol_retries >= 1
+                or result.get('process_exit_code') != 0
+                or getattr(self.child, 'model_error', False)
+                or getattr(self.child, 'native_async_seen', False)):
+            return False
+        if runtime and (getattr(runtime, 'calls', {}) or runtime.tool_errors or runtime.permission_denials):
+            return False
+        if self._snapshot() != self.leader_start_stamp:
+            return False
+        self.leader_protocol_retries += 1
+        self._event('role_retry_requested', {'role':role, 'round':self.round,
+                    'sequence':self.sequence, 'reason':reason})
+        self._start_role()
+        return True
 
     def poll(self):
         if self.result is not None or self.started is None:
@@ -166,6 +207,17 @@ class TeamWorker:
                     return self._finish('failed', role + ': protected workspace changed during read-only verification')
             raw = getattr(self.child, 'result_summary', None) or result.get('summary', '')
             terminal = raw.strip().splitlines()[-1] if raw.strip() else ''
+            problem = result.get('failure_kind')
+            if role.startswith('lead-') and simulated_tool_markup(raw):
+                problem = 'simulated_tool_markup'
+            allowed = ('PLAN',) if role == 'lead-plan' else ('REWORK', 'STOP')
+            if (not problem and role in ('lead-plan','lead-triage')
+                    and result['status'] in ('succeeded','reported_unverified')
+                    and '```router-receipt' not in raw
+                    and terminal not in tuple('ROUTER_LEAD: '+value for value in allowed)):
+                problem = 'invalid_leader_decision'
+            if problem:
+                result = {**result, 'status':'failed', 'failure_kind':problem}
             marker = 'ROUTER_REVIEW' if role == 'reviewer' else 'ROUTER_TEST'
             verdict = terminal.removeprefix(marker+': ') if role in ('reviewer','tester') and terminal in (marker+': PASS',marker+': BLOCKED') else None
             record = {'role': role, **result, 'round': self.round, 'sequence': self.sequence, 'verdict': verdict}
@@ -174,6 +226,10 @@ class TeamWorker:
             self._event('role_finished', record)
             if verdict:
                 self._event('role_verdict', {'role':role,'verdict':verdict,'round':self.round,'sequence':self.sequence})
+            if problem in ('simulated_tool_markup','invalid_leader_decision'):
+                if self._retry_leader_protocol(role, result, problem):
+                    return self.result
+                return self._finish('failed', role + ': ' + problem + '. See preserved role report.')
             runtime = getattr(self.child, 'runtime_evidence', None)
             errors = runtime and (runtime.tool_errors or runtime.permission_denials)
             if result['status'] not in ('succeeded', 'reported_unverified') or errors:
@@ -198,6 +254,7 @@ class TeamWorker:
                 checkpoint={**receipt,'question_id':uuid.uuid4().hex[:12], 'index':self.index,
                     'reports':self.reports,'answers':answers,'checks_before':self.checks.before,
                     'round':self.round,'sequence':self.sequence,'clean_retries':self.clean_retries,'team_protocol':self.protocol,
+                    'leader_protocol_retries':self.leader_protocol_retries,
                     'workspace':workspace_stamp(self.task['project']['path']),
                     'protected_stamp':self.protected_stamp,
                     'remaining_seconds':max(0, self.deadline - time.monotonic())}

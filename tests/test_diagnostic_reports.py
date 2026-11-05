@@ -1,4 +1,6 @@
 import json
+import os
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -61,7 +63,16 @@ class DiagnosticReportTests(unittest.TestCase):
         (outside / 'stderr.log').write_text('OUTSIDE SECRET')
         task_dir = self.root / 'runs' / self.id
         task_dir.mkdir(parents=True)
-        (task_dir / 'attempt-1').symlink_to(outside, target_is_directory=True)
+        link = task_dir / 'attempt-1'
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            if os.name != 'nt' or exc.winerror != 1314:
+                raise
+            # Directory junctions exercise real path escape protection without
+            # requiring Windows developer mode or symbolic-link privileges.
+            subprocess.run(['cmd', '/c', 'mklink', '/J', str(link), str(outside)],
+                           check=True, capture_output=True)
         self.assertNotIn('OUTSIDE SECRET', self.query())
 
     def test_bounded_pagination_and_invalid_page(self):

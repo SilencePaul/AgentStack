@@ -15,6 +15,26 @@ class Child:
     def stop(self,reason): self.stopped=True
 
 class Tests(unittest.TestCase):
+    def test_retry_budget_persists_through_human_question(self):
+        import json
+        from unittest.mock import patch
+        self.task.pop('team_protocol')
+        worker = self.worker()
+        worker.start()
+        worker.child.poll=lambda:{'status':'reported_unverified','process_exit_code':0,'summary':'Missing decision'}
+        self.assertIsNone(worker.poll())
+        question = {'status':'needs_input','question':'Scope?','completed':'Plan','remaining':'Wait'}
+        worker.child.poll=lambda:{'status':'reported_unverified','summary':'```router-receipt\n'+json.dumps(question)+'\n```'}
+        with patch('router.team.workspace_stamp',return_value={'stamp':'stable'}):
+            result = worker.poll()
+            self.assertEqual(result['checkpoint']['leader_protocol_retries'],1)
+            self.task['continuation'] = result['checkpoint']
+            resumed = TeamWorker(['fake'],self.task,self.root/'resumed',lambda *a:None,Child)
+            resumed.start()
+            resumed.child.poll=lambda:{'status':'reported_unverified','process_exit_code':0,'summary':'Still invalid'}
+            self.assertEqual(resumed.poll()['status'],'failed')
+            self.assertEqual(resumed.leader_protocol_retries,1)
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(); self.root=Path(self.temp.name)
         self.task={'team_protocol':1,'goal':'Implement goal','rules_snapshot':'immutable','project':{'path':str(self.root),'timeout':30,'idle_timeout':5}}
@@ -227,3 +247,42 @@ class Tests(unittest.TestCase):
                 w.child.poll=lambda:{'status':'reported_unverified','summary':'ROUTER_LEAD: REWORK'}
                 self.assertIsNone(w.poll())
         self.assertEqual(result['status'],'failed');self.assertEqual(w.round,2)
+
+    def test_leader_protocol_retry_once_and_no_developer_before_valid_decision(self):
+        from types import SimpleNamespace
+        self.task.pop('team_protocol');w=self.worker();w.start();deadline=w.deadline
+        for attempt in range(2):
+            w.child.runtime_evidence=SimpleNamespace(calls={},tool_errors=0,permission_denials=0)
+            w.child.poll=lambda:{'status':'reported_unverified','process_exit_code':0,'summary':'<tool_call>\n<function=Read>\n<parameter=path>x</parameter>\n</function>\n</tool_call>'}
+            result=w.poll()
+            if attempt==0:
+                self.assertIsNone(result)
+                self.assertEqual(w.ROLES[w.index][0],'lead-plan')
+                self.assertEqual(w.leader_protocol_retries,1)
+                self.assertNotIn('<function=Read>',w.child.task['goal'])
+        self.assertEqual(result['status'],'failed')
+        self.assertEqual(len(Child.instances),2)
+        self.assertEqual(w.deadline,deadline)
+
+    def test_leader_retry_accepts_only_new_valid_decision(self):
+        self.task.pop('team_protocol');w=self.worker();w.start()
+        w.child.poll=lambda:{'status':'reported_unverified','process_exit_code':0,'summary':'Missing decision'}
+        self.assertIsNone(w.poll())
+        w.child.poll=lambda:{'status':'reported_unverified','process_exit_code':0,'summary':'Plan only.\nROUTER_LEAD: PLAN'}
+        self.assertIsNone(w.poll());self.assertEqual(w.index,0)
+        self.assertEqual(w.reports[0]['status'],'failed')
+
+    def test_leader_retry_rejects_real_calls_errors_and_changed_workspace(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        self.task.pop('team_protocol')
+        for variant in ('call','denial','exit','changed'):
+            w=TeamWorker(['fake'],self.task,self.root/variant,lambda *a:None,Child)
+            with patch.object(w,'_snapshot',return_value={'stable':True}):
+                w.start()
+            w.child.runtime_evidence=SimpleNamespace(calls={'x':{}} if variant=='call' else {},
+                tool_errors=0,permission_denials=1 if variant=='denial' else 0)
+            w.child.poll=lambda:{'status':'reported_unverified','process_exit_code':1 if variant=='exit' else 0,'summary':'Missing decision'}
+            with patch.object(w,'_snapshot',return_value={'stable':variant!='changed'}):
+                self.assertEqual(w.poll()['status'],'failed')
+            self.assertEqual(w.leader_protocol_retries,0)

@@ -6,30 +6,55 @@
   "roles": {
     "leader": {
       "id": "PROJECT_MANAGER",
-      "version": "v1",
+      "version": "v2",
       "directory": "leader",
-      "skills": []
+      "skills": [],
+      "tools": []
     },
     "developer": {
       "id": "FS_DEV",
-      "version": "v1",
+      "version": "v2",
       "directory": "developer",
       "skills": [
-        "debug"
+        "agentstack-implement"
+      ],
+      "tools": [
+        "Read",
+        "Glob",
+        "Grep",
+        "Skill",
+        "Bash",
+        "Edit",
+        "Write"
       ]
     },
     "reviewer": {
       "id": "CR",
-      "version": "v1",
+      "version": "v2",
       "directory": "reviewer",
-      "skills": []
+      "skills": [
+        "agentstack-review"
+      ],
+      "tools": [
+        "Read",
+        "Glob",
+        "Grep",
+        "Skill"
+      ]
     },
     "tester": {
       "id": "QA",
-      "version": "v1",
+      "version": "v2",
       "directory": "tester",
       "skills": [
         "verify"
+      ],
+      "tools": [
+        "Read",
+        "Glob",
+        "Grep",
+        "Skill",
+        "Bash"
       ]
     }
   }
