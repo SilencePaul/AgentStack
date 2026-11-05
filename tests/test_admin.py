@@ -29,6 +29,10 @@ class AdminTests(unittest.TestCase):
         for spec in ({'kind':'team','id':'bad','repository':'../../private','rules':'','roles':{}},
                      {'kind':'team','id':'bad','repository':'empty','rules':'','roles':{'developer':{'skills':['missing']}}}):
             with self.assertRaises(ValueError):self.admin.validate(spec)
+
+    def test_discovered_skill_can_be_selected_without_code_change(self):
+        self.admin.skills.add('project-specialist')
+        self.admin.validate({'kind':'team','id':'example','repository':'empty','rules':'r','roles':{'developer':{'skills':['project-specialist']}}})
     def test_webhook_cannot_enable_merge_without_policy_implementation(self):
         with self.assertRaises(ValueError):
             self.admin.validate({'kind':'webhook','id':'hook','team':'missing','project_id':1,'actions':['merge'],'mode':'auto-merge'})

@@ -13,6 +13,7 @@
 - `/ops configure 自然语言目标`：AI 生成团队或 webhook 配置草案；缺信息时在 MM 提问。
 - `/ops config 配置ID`、`/ops clarify 配置ID 补充说明`、`/ops apply 配置ID`：查看、修改、确认配置。确认绑定原发信人、频道和线程。
 - `/ops teams`：查看当前团队规则与角色配置。
+- `/ops skills`：查看本次维护进程启动时发现的可用 skill 名称。
 
 业务问答仍使用 `/router answer`；维护问答使用 `/ops answer`。业务 Router 和独立维护进程使用不同运行目录。不要同时在相同频道运行旧的 `router.diagnostics` 和新的维护进程，否则 `/diag` 会收到两个回复。
 
@@ -40,6 +41,6 @@ Windows webhook secret 自动用当前用户 DPAPI 加密存入 OPS_RUNTIME/webh
 
 ## 当前边界
 
-配置支持 leader/developer/reviewer/tester 四个槽位、受支持的 skills 和工具清单。自定义指令不授予操作系统隔离，也不能突破用户原始授权。维护 checkout 和业务代码分开，但 Bash 并非安全沙箱。
+配置支持 leader/developer/reviewer/tester 四个槽位、本机已安装启用的 skills 和受支持的工具清单。自定义指令不授予操作系统隔离，也不能突破用户原始授权。维护 checkout 和业务代码分开，但 Bash 并非安全沙箱。
 
 当前 webhook 只实现 MR 评审路由，未实现 GitLab 自动合并、GitLab webhook 的远程注册、任意新 skill 安装或任意专家角色编排。自动合并需要单独实现并校验目标分支、精确 SHA、CI/审批状态和合并授权；不能只靠模型口头 PASS。配置会对不支持的请求要求澄清。

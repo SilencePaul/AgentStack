@@ -15,9 +15,10 @@ UNSET = object()
 
 
 class ConfigurationPlanner:
-    def __init__(self, command, runtime, model='Auto', cancel_event=None):
+    def __init__(self, command, runtime, model='Auto', cancel_event=None, skills=None):
         self.command, self.runtime, self.model = command, Path(runtime), model
         self.cancel_event = cancel_event
+        self.skills = sorted(skills if skills is not None else SKILLS)
 
     def __call__(self, goal, catalog):
         from .planner import _run
@@ -29,7 +30,7 @@ class ConfigurationPlanner:
                   'Supported team schema: {"kind":"team","id":"slug","repository":"empty OR HTTPS/SSH git URL",'
                   '"rules":"project rules","roles":{"developer":{"skills":["agentstack-implement"],"instructions":"additional role instructions"}}}. '
                   'Slots: leader, developer, reviewer, tester. Roles may be empty for defaults. Leader skills/tools must be empty. '
-                  'Available skills: agentstack-implement, agentstack-review, verify, debug. Role tools optional: Read,Glob,Grep,Skill,Bash,Edit,Write; '
+                  'Available skills: '+json.dumps(self.skills)+'. Role tools optional: Read,Glob,Grep,Skill,Bash,Edit,Write; '
                   'reviewer/tester cannot use Edit/Write. Never invent credentials or repository URLs; empty is only for explicitly requested empty demo projects. '
                   'To update an existing team use its exact id and repository; rules/role instructions should preserve relevant existing constraints. '
                   'Webhook schema: {"kind":"webhook","id":"slug","team":"existing team id","project_id":positive integer,'
@@ -48,9 +49,10 @@ class ConfigurationPlanner:
 
 
 class TeamAdmin:
-    def __init__(self, ops, business, projects_root, config_root, planner):
+    def __init__(self, ops, business, projects_root, config_root, planner, skills=None):
         self.ops, self.business, self.planner = ops, business, planner
         self.projects_root, self.config_root = Path(projects_root).resolve(), Path(config_root).resolve()
+        self.skills = set(skills if skills is not None else SKILLS)
 
     def enqueue(self, goal, source, route):
         if not goal or len(goal)>12000:raise ValueError('配置目标应为1至12000字符')
@@ -102,7 +104,7 @@ class TeamAdmin:
             if not isinstance(spec['roles'],dict) or set(spec['roles'])-SLOTS:raise ValueError('Invalid roles')
             for slot, role in spec['roles'].items():
                 if not isinstance(role,dict) or set(role)-{'skills','tools','instructions'}:raise ValueError('Invalid role fields')
-                for field,allowed in (('skills',SKILLS),('tools',ROLE_TOOLS)):
+                for field,allowed in (('skills',self.skills),('tools',ROLE_TOOLS)):
                     if field in role and (not isinstance(role[field],list) or not all(isinstance(v,str) and v in allowed for v in role[field])
                                           or len(set(role[field]))!=len(role[field])):raise ValueError('Unsupported '+field)
                 if slot=='leader' and (role.get('skills') or role.get('tools')):raise ValueError('Leader has no tools or skills')

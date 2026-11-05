@@ -48,4 +48,4 @@ roles 中可增加 tools 数组，支持 Read、Glob、Grep、Skill、Bash、Edi
 
 示例 v2：开发加载 agentstack-implement；评审加载 agentstack-review；测试加载 verify；Leader 不加载 skill。将 examples/qoder-skills 下两个目录复制到用户的 .qoder/skills 后使用。
 
-独立维护入口启动后，可以通过 /ops configure 用自然语言创建团队、修改项目规则和角色配置。AI 返回草案，原发信人在原线程 /ops apply 配置ID 后生效。已有任务保留原版本。当前支持四个角色槽位以及本地已提供的四项 skills；未知能力会要求澄清，不会假装安装完成。
+独立维护入口启动后，可以通过 /ops configure 用自然语言创建团队、修改项目规则和角色配置。AI 返回草案，原发信人在原线程 /ops apply 配置ID 后生效。已有任务保留原版本。当前支持四个角色槽位以及本机已安装、启用的 skills；未知能力会要求澄清，不会假装安装完成。

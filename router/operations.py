@@ -153,6 +153,7 @@ class OperationsRouter:
         parts = text.strip().split(maxsplit=2)
         action = parts[1] if len(parts) > 1 else 'help'
         if self.admin:
+            if action == 'skills':return '本次启动发现的可选skills：\n'+'\n'.join(sorted(self.admin.skills))
             if action == 'teams':
                 return json.dumps(self.admin.catalog(),ensure_ascii=False,indent=2)
             if action == 'configure' and len(parts) == 3:
@@ -178,7 +179,7 @@ class OperationsRouter:
         if action == 'resume' and len(parts) == 2:
             return Router(self.store).handle('/router project-resume agentstack-maintenance', source_key, reply_to)
         return ('/ops status：维护状态\n/diag show 业务任务ID\n/diag report 业务任务ID [页码]\n'
-                '/ops teams：团队配置\n/ops configure 自然语言配置目标\n/ops config 配置ID\n/ops apply 配置ID\n/ops clarify 配置ID 补充说明\n'
+                '/ops teams：团队配置\n/ops skills：可用skills\n/ops configure 自然语言配置目标\n/ops config 配置ID\n/ops apply 配置ID\n/ops clarify 配置ID 补充说明\n'
                 '/ops start | stop | restart：托管业务Router\n/ops repair 修复目标：独立维护编码\n'
                 '/ops show 维护任务ID\n/ops report 维护任务ID [页码]\n'
                 '/ops answer 维护任务ID 问题ID 答案\n/ops resume：检查失败后解除维护项目暂停（不重跑失败任务）')
@@ -222,9 +223,16 @@ def main():
                 controller.finish(key, item, '维护进程曾中断；此控制请求未重放，请检查实际Router状态。')
         from .admin import TeamAdmin, ConfigurationPlanner
         from .webhooks import GitLabWebhook, server
+        from .worker import clean_environment
+        import re
+        inventory=subprocess.run([*config['qoder_command'],'skills','list','--all'],cwd=source,
+                                 env=clean_environment(),capture_output=True,text=True,encoding='utf-8',timeout=30)
+        if inventory.returncode:raise ValueError('Cannot discover Qoder skills')
+        skills=set(re.findall(r'^(\S+) \[Enabled\]',inventory.stdout,re.M))
+        if not skills:raise ValueError('No recognizable enabled Qoder skills')
         business=Store(Path(args.runtime)/'router.sqlite3',common_rules=store.common_rules)
         admin=TeamAdmin(store,business,args.projects_root,runtime/'profiles',
-                        ConfigurationPlanner(config['qoder_command'],runtime/'config-plans',config.get('maintenance_model','Auto'),stopping))
+                        ConfigurationPlanner(config['qoder_command'],runtime/'config-plans',config.get('maintenance_model','Auto'),stopping,skills),skills)
         # In-flight application is never replayed after a crash. Its partial
         # checkout/config stays available for inspection.
         with store.transaction():
