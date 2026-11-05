@@ -8,11 +8,11 @@
 
 ## Steps
 
-- [ ] Add validated per-role tool lists, CLI enforcement and actual startup inventory checks; keep Leader tools empty.
-- [ ] Add independent /ops status, start, restart, repair, show/report and answer commands. Control actions are durable, deduplicated and processed outside MM transactions. Only owned processes may be restarted; active business jobs block restart.
-- [ ] Configure all registered teams with explicit tools, skills and role instructions; snapshot previous configuration locally.
-- [ ] Run automated regression and real configured-team smoke including coding, review, testing and MM reports.
-- [ ] Exercise MM diagnostics while business router is stopped and restart it; verify separate maintenance coding task and document limits/evidence.
+- [x] Add validated per-role tool lists, CLI enforcement and actual startup inventory checks; keep Leader tools empty.
+- [x] Add independent /ops status, start, restart, repair, show/report and answer commands. Control actions are durable, deduplicated and processed outside MM transactions. Only owned processes may be restarted; active business jobs block restart.
+- [x] Configure all registered teams with explicit tools, skills and role instructions; snapshot previous configuration locally.
+- [x] Run automated regression and real configured-team smoke including coding, review, testing and MM reports.
+- [x] Exercise MM diagnostics while business router is stopped and restart it; verify separate maintenance coding task and document limits/evidence.
 
 ## Checks
 
@@ -25,3 +25,5 @@ User additionally requested MM-authored teams/rules/skills and webhook routing, 
 Local automated suite: 175 tests passed. Real Qwen3.8-Flash configuration smoke completed all five phases with expected skills and restricted tools. MM confirmed business-down diagnostics, managed start, natural-language team draft/apply, webhook draft/apply, maintenance coding/report retrieval. Local HTTP repeated event returned one task; bad token returned403. Maintenance Qoder added exactly one test file in separate checkout; independent rerun passed3 tests. Remaining: live business checks/question continuation, final service reload and managed restart verification.
 
 Review fixes: transactional paused/shutdown check prevents claim/stop race; runtime overlap rejected before opening DB; stop no longer mutates paused; partial role updates preserve unspecified identity/rules/tools; webhook revision checked before update. Live startup uncovered inherited PSModulePath incompatibility; Windows DPAPI subprocess now uses default module search. Live delivery uncovered dot in control notice dedup key; transport-safe key regression added.
+
+Final verification: 176 automatic tests passed; final MM managed restart and heartbeat confirmed; duplicate webhook after restart did not dispatch again. Business/maintenance active queues and outboxes empty. See docs/2026-11-06-mm-local-validation.md for per-scenario outcomes and the deliberately retained travel-helper blocker.
