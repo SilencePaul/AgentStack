@@ -255,7 +255,8 @@ def main():
                             data=json.dumps(event).encode(),method='POST',
                             headers={'Content-Type':'application/json','X-Gitlab-Token':hook_secret,'X-Gitlab-Event':'Merge Request Hook'})
             with urlopen(request,timeout=35) as response:return json.load(response)
-        listener=WebhookListener(('127.0.0.1',args.webhook_port),GitLabWebhook(business,hook_secret,mock_review))
+        listener=WebhookListener(('127.0.0.1',args.webhook_port),GitLabWebhook(business,hook_secret,mock_review,
+            app_rules=config.get('mr_app_rules'), authors=config.get('gitlab_author_mm_ids')))
         mock_commands=MockCommands(store,mock,emit=emit_mock,check=mock_review.check,restart_receiver=listener.restart)
         mock_commands.recover()
         admin=TeamAdmin(store,business,args.projects_root,runtime/'profiles',

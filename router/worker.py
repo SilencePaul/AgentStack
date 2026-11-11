@@ -8,6 +8,7 @@ import threading
 import time
 import uuid
 from .process_tree import ProcessTree
+from .public_events import public_events
 from .diagnostics import tool_activity
 from .protocol import simulated_tool_markup
 from .verification import Checks, Evidence, render_report
@@ -183,6 +184,9 @@ class Worker:
                                 if isinstance(observed,list) and all(isinstance(item,str) for item in observed):
                                     self.observed_skills = sorted(observed)
                                     self._event('role_skills_loaded', {'skills':self.observed_skills})
+                            for observation in public_events(event):
+                                observation['session_id'] = self.session_id
+                                self._event('public_output', observation)
                             self.runtime_evidence.observe(event)
                             for activity in tool_activity(event):self._event('tool_activity', activity)
                             if event.get('subtype') in ('task_started', 'background_tasks_changed') or event.get('type') in ('task_started', 'background_tasks_changed'):

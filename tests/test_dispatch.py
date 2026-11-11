@@ -25,7 +25,7 @@ class DispatchTests(unittest.TestCase):
             self.assertIsNone(task['reply_to']);self.store.finish(task['id'],'reported_unverified','report','evidence')
         self.assertEqual(self.queue.flush_reports(),1)
         self.assertEqual(self.queue.flush_reports(),0)
-        self.assertEqual(len(self.store.outbox_pending()),2)
+        self.assertEqual(len(self.store.outbox_pending()),1)
     def test_planned_question_returns_to_original_thread_and_final_is_aggregated(self):
         route={'channel_id':'c','root_id':'thread','source_user_id':'owner'}
         self.queue.enqueue('work','source',route)
@@ -39,7 +39,7 @@ class DispatchTests(unittest.TestCase):
         self.store.claim()
         self.store.finish(tid,'succeeded','done',None)
         self.assertEqual(self.queue.flush_reports(),1)
-        self.assertEqual(len(self.store.outbox_pending()),3)  # plan, question, aggregate
+        self.assertEqual(len(self.store.outbox_pending()),2)  # required question and final aggregate
 
     def test_invalid_plan_atomic(self):
         self.queue.enqueue('work','source',{})
@@ -94,14 +94,14 @@ class DispatchTests(unittest.TestCase):
         self.store.finish(first['id'],'failed','first failed','proof')
         self.assertEqual(self.queue.flush_reports(),0)
         pending=self.store.outbox_pending()
-        self.assertEqual(len(pending),2)
+        self.assertEqual(len(pending),1)
         self.assertIn('attention:'+first['id'],pending[-1]['dedup_key'])
         self.assertIn('project-resume a',pending[-1]['text'])
         self.assertEqual(self.queue.flush_reports(),0)
-        self.assertEqual(len(self.store.outbox_pending()),2)
+        self.assertEqual(len(self.store.outbox_pending()),1)
         self.store.finish(second['id'],'reported_unverified','later report','proof2')
         self.assertEqual(self.queue.flush_reports(),1)
-        self.assertEqual(len(self.store.outbox_pending()),3)
+        self.assertEqual(len(self.store.outbox_pending()),2)
         self.assertEqual(self.queue.flush_reports(),0)
 
     def test_original_authorization_preserved_despite_plan(self):

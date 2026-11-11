@@ -88,3 +88,27 @@ class Tests(unittest.TestCase):
             result=SimpleNamespace(returncode=0,stdout=json.dumps(body),stderr='')
             with patch('router.mm.subprocess.run',return_value=result):
                 with self.assertRaises(TransportRejected):AiCrew('fake').call('say','private content')
+
+    def test_channel_mention_is_bound_to_project_and_replies_only_on_finish(self):
+        from router.service import Router
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            s = Store(':memory:')
+            self.addCleanup(s.close)
+            s.add_project('d365', root)
+            c = Mock()
+            route = {'channel_id':'c','bot_username':'ag_liuym55','project_id':'d365'}
+            poller = Poller(c, s, Router(s), [route], ['human'], 'bot')
+            s.set_meta('mm.cursor:c', {'time':10,'ids':[]})
+            query = post('q', 11, root_id='thread')
+            query['message'] = '@ag_liuym55 查一下这次的测试'
+            c.get.side_effect = [page(query, post('old', 9))]
+            poller.poll()
+            task, = s.tasks()
+            self.assertEqual(task['project_id'], 'd365')
+            self.assertEqual(s.outbox_pending(), [])
+            s.finish(task['id'], 'succeeded', '18 tests passed')
+            notice, = s.outbox_pending()
+            self.assertEqual(notice['reply_to']['root_id'], 'thread')
+            self.assertEqual(notice['reply_to']['mention_id'], 'human')
+            self.assertIn('18 tests passed', notice['text'])

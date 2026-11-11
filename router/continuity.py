@@ -12,6 +12,8 @@ RECEIPT_INSTRUCTION = '''If a human answer is essential, stop doing work and end
 Do not include secrets in the question. The closing fence must be alone on its line.
 Put any explanation before the receipt; output nothing after it. Never combine needs_input with
 PASS/BLOCKED verdicts or instructions to keep executing. Exit normally and wait for the human answer.
+For an explicit execution confirmation, add "input_kind":"confirmation" to the same receipt.
+Describe the exact proposed action and affected files/branch in question. Do not perform it before the answer.
 This is NOT completion.
 The router-receipt fence is reserved exclusively for needs_input. Never use it
 for success/pass reports, test evidence, examples, or quoted historical receipts.
@@ -36,8 +38,10 @@ def read_receipt(text):
     blocks=[match.group(1)]
     if len(blocks[0])>12000:raise ValueError('Question receipt exceeds limit')
     data=json.loads(blocks[0])
-    if not isinstance(data,dict) or set(data)!={'status','question','completed','remaining'} or data['status']!='needs_input':
+    if not isinstance(data,dict) or set(data) not in ({'status','question','completed','remaining'}, {'status','question','completed','remaining','input_kind'}) or data['status']!='needs_input':
         raise ValueError('Invalid question receipt schema')
+    if data.get('input_kind', 'answer') not in ('answer', 'confirmation'):
+        raise ValueError('Invalid input kind')
     for key,limit in (('question',1000),('completed',4000),('remaining',4000)):
         if not isinstance(data[key],str) or not data[key].strip() or len(data[key])>limit:
             raise ValueError('Invalid question receipt field: '+key)

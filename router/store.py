@@ -83,8 +83,12 @@ class Store:
             self.db.execute('INSERT INTO projects VALUES (?,?)', (project_id,json.dumps(config)))
         return config
 
-    def update_project(self, project_id, rules=None, context=None, model=None, timeout=None, idle_timeout=None, agent_profiles=None):
-        changes = dict(rules=rules, context=context, model=model, timeout=timeout, idle_timeout=idle_timeout, agent_profiles=agent_profiles)
+    def update_project(self, project_id, rules=None, context=None, model=None, timeout=None, idle_timeout=None, agent_profiles=None, workspace_mode=None, concurrency=None):
+        changes = dict(workspace_mode=workspace_mode, concurrency=concurrency, rules=rules, context=context, model=model, timeout=timeout, idle_timeout=idle_timeout, agent_profiles=agent_profiles)
+        if workspace_mode is not None and workspace_mode not in ('shared', 'git', 'copy'):
+            raise ValueError('Unknown workspace mode')
+        if concurrency is not None and (type(concurrency) is not int or not 1 <= concurrency <= 8):
+            raise ValueError('Team concurrency must be 1-8')
         for key in ('timeout', 'idle_timeout'):
             value = changes[key]
             if value is not None and not (isinstance(value, (int, float)) and math.isfinite(value) and value > 0):
@@ -95,6 +99,8 @@ class Store:
                 raise ValueError('Unknown project: ' + project_id)
             config = json.loads(row[0])
             config.update({k:v for k,v in changes.items() if v is not None})
+            if config.get('workspace_mode', 'shared') == 'shared' and config.get('concurrency', 1) > 1:
+                raise ValueError('Parallel tasks require isolated workspaces')
             self.db.execute('UPDATE projects SET config=? WHERE id=?', (json.dumps(config), project_id))
             return config
 
@@ -147,12 +153,32 @@ class Store:
                 return None
             if self.db.execute("SELECT COUNT(*) FROM tasks WHERE status='running'").fetchone()[0] >= limit:
                 return None
-            row = self.db.execute("SELECT * FROM tasks t WHERE status='queued' AND NOT EXISTS (SELECT 1 FROM tasks r WHERE r.status IN ('running','waiting_input') AND r.project_id=t.project_id) ORDER BY rowid").fetchall()
-            row = next((r for r in row if not self.meta("project_paused:" + r["project_id"], False)), None)
+            rows = self.db.execute("SELECT * FROM tasks WHERE status='queued' ORDER BY CASE WHEN continuation IS NULL THEN 1 ELSE 0 END, rowid").fetchall()
+            row = next((r for r in rows if self.can_claim(self.decode(r))), None)
             if row is None:
                 return None
             self.db.execute("UPDATE tasks SET status='running',attempt=attempt+1 WHERE id=?",(row['id'],))
             return self.get(row['id'])
+
+    def can_claim(self, task):
+        if self.meta('project_paused:' + task['project_id'], False):
+            return False
+        others = [self.decode(r) for r in self.db.execute(
+            "SELECT * FROM tasks WHERE project_id=? AND id!=? AND status IN ('running','waiting_input')",
+            (task['project_id'], task['id']))]
+        isolated = task['project'].get('workspace_mode', 'shared') != 'shared'
+        if not isolated or any(t['project'].get('workspace_mode', 'shared') == 'shared' for t in others):
+            return not others
+        return sum(t['status'] == 'running' for t in others) < task['project'].get('concurrency', 1)
+
+    def save_workspace(self, task_id, project):
+        with self.transaction():
+            task = self.get(task_id)
+            if task['status'] != 'running':
+                raise ValueError('Task no longer running')
+            self.db.execute('UPDATE tasks SET project=? WHERE id=?', (json.dumps(project), task_id))
+            self.event(task_id, 'workspace_ready', {'path': project['path'], 'branch': project.get('branch')})
+            return self.get(task_id)
 
     def question_route(self, task):
         if task['reply_to'] is not None:
@@ -173,7 +199,7 @@ class Store:
                 (json.dumps(checkpoint),json.dumps(evidence),checkpoint['question'],task_id))
             self.event(task_id,'waiting_input',{'question_id':checkpoint['question_id'],'phase_index':checkpoint['index']})
             route = self.question_route(task)
-            if route:
+            if route and not route.get('final_only'):
                 self._notice(route,'任务 '+task_id+' 等待回答：'+checkpoint['question']+'\n在本线程回复：/router answer '+task_id+' '+checkpoint['question_id']+' 你的答案',
                     'question:'+task_id+':'+checkpoint['question_id'],task_id)
 
@@ -199,20 +225,25 @@ class Store:
         task = self.get(task_id)
         if task is None:
             raise ValueError('Unknown task')
-        if task['status'] not in ('running','queued'):
+        if task['status'] not in ('running','queued','waiting_input','awaiting_approval'):
             return
         self.db.execute('UPDATE tasks SET status=?,summary=?,evidence=? WHERE id=?',
                         (status,summary,json.dumps(evidence),task_id))
         self.db.execute('INSERT INTO events(task_id,kind,detail) VALUES (?,?,?)',(task_id,status,json.dumps(summary)))
-        if status in ('failed', 'failure', 'timed_out', 'timeout', 'interrupted'):
+        if status in ('failed', 'failure', 'timed_out', 'timeout', 'interrupted') and task['project'].get('workspace_mode', 'shared') == 'shared':
             self.db.execute('INSERT INTO metadata VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
                             ('project_paused:' + task['project_id'], 'true'))
         if task['reply_to'] is not None:
             text = f"项目 {task['project_id']}\n任务 {task_id}\n状态 {status}\n通过 /diag report {task_id} 查询脱敏报告和工具报错。"
+            if task['reply_to'].get('final_only'):
+                from .diagnostic_reports import redact
+                iid = task['reply_to'].get('mr_iid')
+                subject = f'MR !{iid}' if iid else task['project_id']
+                text = f"{subject} · {status}\n{redact(str(summary or '无报告'))[:1800]}"
             self._notice(task['reply_to'], text, 'task:'+task_id, task_id)
 
     def finish(self, task_id, status, summary, evidence=None):
-        if status not in ('succeeded','reported_unverified','failed','timed_out','interrupted'):
+        if status not in ('succeeded','reported_unverified','failed','timed_out','interrupted','cancelled'):
             raise ValueError('Finish requires terminal status')
         with self.transaction():
             self._finish(task_id,status,summary,evidence)

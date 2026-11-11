@@ -50,8 +50,9 @@ def make_server(path, port=8787):
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--runtime',default='.runtime');parser.add_argument('--port',type=int,default=8787)
-    args=parser.parse_args();server=make_server(Path(args.runtime)/'router.sqlite3',args.port)
-    print('Read-only monitor: http://127.0.0.1:'+str(server.server_port)+' (this machine only)',flush=True)
+    from .workbench import make_server as workbench_server
+    args=parser.parse_args();server=workbench_server(Path(args.runtime)/'router.sqlite3',args.port)
+    print('AgentStack workbench: http://127.0.0.1:'+str(server.server_port)+' (this machine only)',flush=True)
     try:server.serve_forever()
     except KeyboardInterrupt:pass
     finally:server.server_close()

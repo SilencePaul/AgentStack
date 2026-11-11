@@ -52,3 +52,31 @@ class WebhookTests(unittest.TestCase):
         self.assertEqual(len(self.store.tasks()),2)
         self.event['object_attributes']['action']='merge'
         self.assertEqual(self.hook.receive('mr','secret','Merge Request Hook',self.event),{'ignored':True})
+
+    def test_app_routes_author_and_emits_each_result_once(self):
+        hook = GitLabWebhook(self.store, 'secret', app_rules={'mr': {
+            'aliases': ['d365-nano'], 'path': 'sales/d365-nano', 'suite': ['pytest', 'tests/sales'],
+        }}, authors={'81': 'author-mm'})
+        self.event['user'] = {'id': 99}
+        attrs = self.event['object_attributes']
+        attrs.update(title='[d365-nano-other] fix', author_id=81)
+        def receive():
+            return hook.receive('mr', 'secret', 'Merge Request Hook', self.event)
+        self.assertEqual(receive(), {'ignored': True})
+        attrs.update(title='[d365-nano] fix')
+        tid = receive()['task_id']
+        self.assertEqual(receive()['task_id'], tid)
+        self.assertEqual(self.store.outbox_pending(), [])
+        task = self.store.get(tid)
+        self.assertTrue(task['project']['review_only'])
+        self.assertIn('compare_app_tests.py', task['goal'])
+        self.store.finish(tid, 'reported_unverified', '已有失败 1，新增失败 0')
+        attrs.update(action='merge', state='merged', target_branch='dev')
+        receive()
+        receive()
+        notices = self.store.outbox_pending()
+        self.assertEqual(len(notices), 2)
+        self.assertIn('新增失败 0', notices[0]['text'])
+        self.assertEqual(notices[1]['text'], 'MR !7 已合并到 dev。')
+        for notice in notices:
+            self.assertEqual(notice['reply_to']['mention_id'], 'author-mm')

@@ -79,7 +79,7 @@ class PlanningQueue:
                         task_ids.append(created['id'])
                     saved=dict(result,task_ids=task_ids)
                     self.store.db.execute("UPDATE planning SET status='dispatched',result=? WHERE id=?",(json.dumps(saved),row['id']))
-                    self._notice(row,'规划 '+row['id']+' 已派发 '+str(len(task_ids))+' 个任务：'+', '.join(t['project_id']+' / '+tid for t,tid in zip(result['tasks'],task_ids)),'dispatched')
+                    # Dispatch progress is visible in the workbench; MM receives the result.
         except Exception as exc:
             with self.store.transaction():
                 error=str(exc)[:2000]
@@ -101,13 +101,15 @@ class PlanningQueue:
 
     def flush_reports(self):
         count=0
-        terminal={'succeeded','reported_unverified','failed','timed_out','interrupted'}
+        terminal={'succeeded','reported_unverified','failed','timed_out','interrupted','cancelled'}
         with self.store.transaction():
             rows=self.store.db.execute("SELECT * FROM planning WHERE status='dispatched' AND reported=0").fetchall()
             for row in rows:
                 saved=json.loads(row['result'])
                 tasks=[self.store.get(tid) for tid in saved['task_ids']]
                 for task in tasks:
+                    if all(t and t['status'] in terminal for t in tasks):
+                        break
                     if task is None or task['status'] not in ('failed','timed_out','interrupted'):
                         continue
                     queued = [t for t in tasks if t is not None and t['project_id'] == task['project_id'] and t['status'] == 'queued']

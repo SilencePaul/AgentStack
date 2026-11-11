@@ -93,6 +93,12 @@ class AiCrew:
         existing = find()
         if existing:
             return existing
+        if route.get('mention_id'):
+            user = self.get('/users/' + quote(route['mention_id'], safe=''))
+            username = user.get('username', '')
+            if user.get('id') != route['mention_id'] or not re.fullmatch(r'[a-z0-9._-]+', username):
+                raise ValueError('Cannot resolve MM recipient')
+            text = '@' + username + ' ' + text.replace('@', '＠')
         args = ['say']
         if route.get('dm_user'):
             args += ['--dm', route['dm_user'], text + '\n\n' + marker]
@@ -183,16 +189,27 @@ class Poller:
                 if self.store.meta(done):
                     continue
                 text = p.get('message', '').strip()
+                mention = route.get('bot_username')
+                words = text.split(maxsplit=1)
+                directed = (self.accept_query is None and mention and route.get('project_id')
+                            and words and words[0] == '@' + mention and len(words) == 2)
+                if directed:
+                    text = '/router run ' + route['project_id'] + ' ' + words[1]
                 if (p.get('user_id') in self.allowed and p.get('user_id') != self.bot_id
                         and not p.get('type') and not p.get('delete_at') and not p.get('edit_at')
                         and not p.get('props', {}).get('from_bot')
                         and self._accept(text, route)):
                     reply = {**route, 'root_id': p.get('root_id') or p['id'], 'source_user_id': p['user_id']}
+                    if directed or text.startswith(('/router run ', '/router goal ')):
+                        reply.update(mention_id=p['user_id'], final_only=True)
                     try:
                         answer = self.router.handle(text, source_key=p['id'], reply_to=reply)
                     except ValueError as exc:
-                        answer = str(exc)
-                    self.store.enqueue_notice(reply, answer, 'command:' + p['id'])
+                        self.store.enqueue_notice(reply, str(exc), 'command:' + p['id'])
+                    else:
+                        silent = directed or text.startswith(('/router run ', '/router goal ', '/router answer ', '/router clarify '))
+                        if not silent:
+                            self.store.enqueue_notice(reply, answer, 'command:' + p['id'])
                 self.store.set_meta(done, True)
         newest = max([cursor['time']] + [p['create_at'] for p in fresh])
         ids = {p['id'] for p in fresh if p['create_at'] == newest}

@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AgentStack · 工作台</title>
+<style>
+:root { color-scheme: dark; --bg:#10151b; --panel:#161e27; --line:#2b3642; --text:#e2e9ee; --muted:#94a3b2; --accent:#8ee1bc; --warn:#ebc184; font:14px/1.6 "Segoe UI","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--text); }
+* { box-sizing:border-box; }
+body { margin:0; }
+button,input,textarea,select { font:inherit; color:inherit; }
+button { cursor:pointer; border:1px solid var(--line); background:#202c38; border-radius:6px; padding:8px 12px; }
+button:hover { border-color:var(--accent); }
+button:disabled { opacity:.45; cursor:default; }
+button:focus-visible,a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.primary { background:var(--accent); color:#11261e; font-weight:650; border-color:var(--accent); }
+.danger { color:#f5aaa4; }
+input,textarea,select { background:#0e151d; border:1px solid var(--line); border-radius:5px; padding:10px; width:100%; }
+textarea { resize:vertical; min-height:110px; }
+label { display:block; margin:12px 0 6px; color:var(--muted); }
+h1,h2,h3,p { margin:0; }
+h1 { font-size:24px; letter-spacing:-.5px; }
+h2 { font-size:19px; }
+h3 { font-size:15px; }
+small,.muted { color:var(--muted); }
+header { height:84px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:20px; padding:0 26px; }
+.brand { font-weight:700; font-size:20px; letter-spacing:-.5px; }
+.brand span { color:var(--accent); margin-right:8px; }
+.header-right { display:flex; gap:16px; align-items:center; }
+.shell { display:grid; grid-template-columns:220px minmax(270px,360px) minmax(400px,1fr); min-height:calc(100vh - 84px); }
+aside { padding:22px 14px; border-right:1px solid var(--line); }
+.section-label { font-size:11px; letter-spacing:1.8px; color:var(--muted); margin:10px 12px; }
+.team { width:100%; text-align:left; margin:4px 0; background:transparent; border-color:transparent; }
+.team.active { background:#20382f; color:var(--accent); border-color:#345548; }
+.team small { display:block; margin-top:4px; }
+.list-column { padding:24px 16px; border-right:1px solid var(--line); }
+.list-top { display:flex; gap:8px; justify-content:space-between; align-items:center; margin-bottom:14px; }
+#filter { margin:10px 0 16px; }
+.task-card { display:block; width:100%; text-align:left; padding:15px; margin-bottom:10px; background:var(--panel); }
+.task-card.selected { border-color:var(--accent); box-shadow:inset 3px 0 var(--accent); }
+.task-card p { margin:7px 0; overflow-wrap:anywhere; }
+.pill { font-size:11px; padding:3px 7px; border-radius:4px; background:#263644; display:inline-block; }
+.pill.running { color:var(--accent); background:#244033; }
+.pill.waiting_input,.pill.awaiting_approval,.pill.failed { color:var(--warn); background:#3b3020; }
+.detail { min-width:0; padding:26px; }
+.detail-head { display:flex; justify-content:space-between; gap:14px; align-items:flex-start; }
+#goal { font-size:19px; margin:15px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.meta { display:flex; flex-wrap:wrap; gap:8px 20px; font-size:12px; color:var(--muted); }
+#workspace { overflow-wrap:anywhere; margin-top:8px; font-family:Consolas,monospace; font-size:12px; }
+.tabs { display:flex; gap:8px; margin:24px 0 18px; border-bottom:1px solid var(--line); padding-bottom:12px; }
+.tabs button.active { color:var(--accent); border-color:var(--accent); }
+.callout { border:1px solid #80663d; padding:18px; background:#252218; border-radius:8px; margin:20px 0; }
+.callout p { margin:6px 0; white-space:pre-wrap; }
+.actions { display:flex; gap:10px; margin-top:12px; flex-wrap:wrap; }
+#timeline { max-height:62vh; overflow:auto; padding-right:8px; }
+.event { border-left:2px solid #314758; margin:0 0 12px 5px; padding:0 0 10px 16px; }
+.event.public_output { border-left-color:#659780; }
+.event small { display:block; }
+.event pre { margin:6px 0; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.7 Consolas,"Microsoft YaHei",monospace; }
+pre.report { white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.8 Consolas,"Microsoft YaHei",monospace; max-height:65vh; overflow:auto; }
+.empty { padding:60px 10px; color:var(--muted); text-align:center; }
+#notice { position:sticky; top:0; background:#3a2427; color:#ffc7bd; padding:12px 22px; z-index:5; }
+#status { color:var(--muted); font-size:12px; }
+dialog { background:var(--panel); color:var(--text); border:1px solid #435566; border-radius:12px; width:min(560px,94vw); padding:26px; }
+dialog::backdrop { background:#0009; }
+dialog small { display:block; margin:8px 0; }
+[hidden] { display:none!important; }
+@media(max-width:1050px) { .shell { grid-template-columns:180px 280px minmax(330px,1fr); } header,.detail { padding:18px; } }
+@media(max-width:800px) { .shell { display:block; } aside { border-right:0; border-bottom:1px solid var(--line); padding:10px; } #teams { display:flex; flex-wrap:wrap; } .team { width:auto; } .list-column { border-right:0; } #task-list { max-height:300px; overflow:auto; } header { height:auto; } .header-right { gap:8px; } #status { max-width:130px; } }
+</style>
+</head>
+<body>
+<header>
+  <div><div class="brand"><span>◈</span>AgentStack</div><small>团队与任务工作台</small></div>
+  <div class="header-right"><span id="status" role="status">正在连接本机服务…</span><button id="refresh">刷新</button><button class="primary" id="new-task">新建任务</button></div>
+</header>
+<div id="notice" role="alert" hidden></div>
+<div class="shell">
+  <aside><div class="section-label">TEAMS</div><div id="teams"></div><button id="settings" style="width:100%;margin-top:20px">Team 执行设置</button></aside>
+  <section class="list-column">
+    <div class="list-top"><h2 id="team-title">全部任务</h2><small id="count"></small></div>
+    <input id="search" placeholder="搜索目标或任务编号" aria-label="搜索任务">
+    <select id="filter" aria-label="任务状态">
+      <option value="all">全部任务</option><option value="active">正在执行 / 排队</option>
+      <option value="attention">等待回复 / 确认</option><option value="ended">已结束</option>
+    </select>
+    <div id="task-list"></div>
+  </section>
+  <main class="detail">
+    <div id="empty" class="empty"><h2>选择一个任务</h2><p>查看 Qoder 会话、执行过程和需要处理的问题。</p></div>
+    <section id="task-detail" hidden>
+      <div class="detail-head"><div><h1 id="task-team"></h1><small id="task-id"></small></div><button class="danger" id="stop">停止任务</button></div>
+      <p id="goal"></p><div class="meta" id="task-meta"></div><p id="workspace" class="muted"></p>
+      <div id="human-action" class="callout" hidden>
+        <h3 id="action-title"></h3><p id="question"></p>
+        <textarea id="answer" aria-label="回复问题" placeholder="输入补充信息"></textarea>
+        <div class="actions"><button class="primary" id="answer-send">发送回复并继续</button><button class="primary" id="approve">确认执行</button><button class="danger" id="reject">拒绝执行</button></div>
+      </div>
+      <div class="tabs" role="tablist">
+        <button data-tab="activity" class="active">实时过程</button>
+        <button data-tab="sessions">执行会话</button><button data-tab="diff">代码差异</button><button data-tab="result">结果</button>
+      </div>
+      <div id="activity"><small id="event-status"></small><div id="timeline" aria-live="off"></div></div>
+      <pre id="sessions" class="report" hidden></pre>
+      <pre id="diff" class="report" hidden></pre>
+      <pre id="result" class="report" hidden></pre>
+    </section>
+  </main>
+</div>
+<dialog id="create-dialog">
+  <form id="create-form"><h2>新建任务</h2>
+    <label for="create-team">负责 Team</label><select id="create-team" required></select>
+    <label for="create-goal">要完成的工作及授权范围</label>
+    <textarea id="create-goal" required maxlength="90000" placeholder="例如：定位 #406 的原因，修复并运行相关测试。"></textarea>
+    <small>先创建待确认任务，查看目标与 Team 后确认执行。</small>
+    <div class="actions"><button class="primary" type="submit">创建待确认任务</button><button type="button" data-close="create-dialog">取消</button></div>
+  </form>
+</dialog>
+<dialog id="settings-dialog">
+  <form id="settings-form"><h2>Team 执行设置</h2>
+    <label for="settings-team">Team</label><select id="settings-team"></select>
+    <label for="mode">任务工作目录</label><select id="mode"><option value="git">独立 Git 克隆与分支</option><option value="copy">独立目录副本（烟测项目）</option><option value="shared">原工作目录 · 串行</option></select>
+    <small>Git 模式以本地已提交的 HEAD 为基线。任务输出保留在独立目录。测试端口与外部数据资源需按项目隔离。</small>
+    <label for="slots">该 Team 最大并发数</label><input id="slots" type="number" min="1" max="8" required>
+    <small>设置应用于新任务，全局并发上限仍由 Router 配置控制。</small>
+    <div class="actions"><button class="primary" type="submit">保存设置</button><button type="button" data-close="settings-dialog">取消</button></div>
+  </form>
+</dialog>
+<script>
+const $ = id => document.getElementById(id);
+const labels = {running:'执行中',queued:'等待调度',waiting_input:'等待回复',awaiting_approval:'等待确认',failed:'执行失败',timed_out:'执行超时',interrupted:'已中断',cancelled:'已停止',reported_unverified:'已报告 · 待验收',succeeded:'验收通过'};
+let token = '', data = null, selected = '', team = '', detail = null, cursor = 0;
+let refreshing = false, commandBusy = false, actionKey = '', tab = 'activity', generation = 0;
+let createRequest = '';
+const drafts = new Map();
+
+function node(tag, text, className) {
+  const element = document.createElement(tag);
+  if (text !== undefined) element.textContent = text;
+  if (className) element.className = className;
+  return element;
+}
+function error(message) {
+  $('notice').hidden = !message;
+  $('notice').textContent = message;
+}
+async function api(path, body) {
+  const options = {headers:{'X-Workbench-Token':token}, signal:AbortSignal.timeout(15000)};
+  if (body) {
+    options.method = 'POST';
+    options.headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(path, options);
+  const value = await response.json();
+  if (!response.ok) throw Error(value.error || '请求失败');
+  return value;
+}
+function active(status) { return ['running','queued','waiting_input','awaiting_approval'].includes(status); }
+function renderList() {
+  if (!data) return;
+  $('teams').replaceChildren();
+  for (const project of [{id:'',label:'全部 Team'}, ...data.projects]) {
+    const tasks = data.all_tasks.filter(t => !project.id || t.project_id === project.id);
+    const button = node('button', project.label || project.id, 'team' + (team === project.id ? ' active' : ''));
+    button.append(node('small', tasks.filter(t => t.status === 'running').length + ' 执行中 · ' + tasks.filter(t => t.status === 'waiting_input' || t.status === 'awaiting_approval').length + ' 待处理'));
+    button.onclick = () => { team = project.id; renderList(); };
+    $('teams').append(button);
+  }
+  $('team-title').textContent = team || '全部任务';
+  const query = $('search').value.toLowerCase(), filter = $('filter').value;
+  const tasks = data.all_tasks.filter(t => (!team || t.project_id === team) &&
+    (t.goal + t.id).toLowerCase().includes(query) &&
+    (filter === 'all' || filter === 'active' && ['running','queued'].includes(t.status) ||
+      filter === 'attention' && ['waiting_input','awaiting_approval'].includes(t.status) ||
+      filter === 'ended' && !active(t.status)));
+  $('count').textContent = tasks.length + ' 个';
+  $('task-list').replaceChildren();
+  for (const task of tasks) {
+    const button = node('button', undefined, 'task-card' + (selected === task.id ? ' selected' : ''));
+    button.append(node('span', labels[task.status] || task.status, 'pill ' + task.status),
+      node('p', task.goal), node('small', task.project_id + ' · ' + task.id.slice(0,8)));
+    button.onclick = () => selectTask(task.id);
+    $('task-list').append(button);
+  }
+  if (!tasks.length) $('task-list').append(node('p', '当前没有任务。', 'empty'));
+}
+async function selectTask(id) {
+  if (actionKey) drafts.set(actionKey, $('answer').value);
+  selected = id; detail = null; cursor = 0; generation++; actionKey = '';
+  $('timeline').replaceChildren();
+  $('diff').textContent = '请选择代码差异标签读取当前任务。';
+  $('empty').hidden = true; $('task-detail').hidden = false;
+  $('human-action').hidden = true;
+  renderList();
+  await loadTask();
+}
+function renderTask() {
+  $('task-team').textContent = detail.project_id;
+  $('task-id').textContent = detail.id;
+  $('goal').textContent = detail.goal;
+  $('task-meta').replaceChildren(node('span', labels[detail.status] || detail.status),
+    node('span', '执行批次 ' + detail.attempt), node('span', detail.branch || '原项目目录'));
+  $('workspace').textContent = detail.workspace;
+  $('stop').disabled = commandBusy || !active(detail.status) || detail.cancel_requested;
+  $('stop').textContent = detail.cancel_requested ? '正在停止…' : '停止任务';
+  $('result').textContent = detail.summary || '等待执行结果。';
+  const waiting = detail.status === 'waiting_input', initial = detail.status === 'awaiting_approval';
+  const confirming = initial || detail.input_kind === 'confirmation';
+  $('human-action').hidden = !(waiting || initial);
+  const key = detail.id + ':' + (initial ? detail.goal_digest : detail.question_id);
+  if (key !== actionKey) {
+    if (actionKey) drafts.set(actionKey, $('answer').value);
+    actionKey = key; $('answer').value = drafts.get(key) || '';
+  }
+  $('action-title').textContent = confirming ? '确认本次执行' : '需要你补充信息';
+  $('question').textContent = initial ? '确认按上方目标在此 Team 执行。' : detail.question;
+  $('answer').hidden = confirming;
+  $('answer-send').hidden = confirming;
+  $('approve').hidden = !confirming; $('reject').hidden = !confirming;
+  for (const id of ['answer-send','approve','reject']) $(id).disabled = commandBusy;
+}
+async function loadTask() {
+  if (!selected) return;
+  const id = selected, version = generation;
+  try {
+    const [task, batch] = await Promise.all([
+      api('/api/task?task=' + id), api('/api/events?task=' + id + '&after=' + cursor)
+    ]);
+    if (id !== selected || version !== generation) return;
+    detail = task; renderTask();
+    const timeline = $('timeline');
+    const atBottom = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 70;
+    for (const event of batch.events) {
+      const entry = node('div', undefined, 'event ' + event.kind);
+      entry.append(node('small', event.time + ' UTC · ' + (event.role || '') + ' · ' + event.kind), node('pre', event.text));
+      timeline.append(entry);
+    }
+    cursor = batch.cursor;
+    while (timeline.children.length > 500) timeline.firstChild.remove();
+    if (atBottom) timeline.scrollTop = timeline.scrollHeight;
+    $('event-status').textContent = '每秒同步 · 显示最近 500 条公开活动';
+    const workers = (data?.workers || []).filter(w => w.task_id === id);
+    $('sessions').textContent = workers.map(w => [w.phase || w.role, '状态 ' + w.state,
+      'PID ' + (w.pid || '未记录'), 'Session ' + (w.session_id || '未记录'),
+      '最近工具 ' + (w.tool || '无记录')].join('\n')).join('\n\n') || '尚无会话记录。';
+  } catch (err) { error(err.message); }
+}
+async function refresh() {
+  if (refreshing) return;
+  refreshing = true;
+  try {
+    if (!token) token = (await api('/api/session')).token;
+    data = await api('/api/status');
+    renderList(); await loadTask();
+    $('status').textContent = data.health?.router === 'online' ? '● Router 在线 · ' + new Date().toLocaleTimeString() : '● Router 离线 · 可查看与保存操作';
+  } catch (err) {
+    $('status').textContent = '连接中断 · 当前显示上次记录';
+    token = ''; error(err.message);
+  } finally { refreshing = false; }
+}
+async function act(payload) {
+  if (commandBusy) return;
+  commandBusy = true; if (detail) renderTask();
+  try {
+    error('');
+    const result = await api('/api/command', {request_id:crypto.randomUUID(), ...payload});
+    await refresh();
+    return result;
+  } catch (err) { error(err.message); }
+  finally { commandBusy = false; if (detail) renderTask(); }
+}
+$('answer-send').onclick = () => act({action:'answer',task_id:detail.id,question_id:detail.question_id,answer:$('answer').value});
+function decision(approved) {
+  if (!detail) return;
+  act({action:detail.status === 'awaiting_approval' ? 'approve' : 'answer', task_id:detail.id,
+    question_id:detail.question_id,goal_digest:detail.goal_digest,approved});
+}
+$('approve').onclick = () => decision(true);
+$('reject').onclick = () => decision(false);
+$('stop').onclick = () => {
+  if (detail && confirm('停止这个任务，并保留当前工作目录？')) act({action:'stop',task_id:detail.id});
+};
+for (const button of document.querySelectorAll('[data-tab]')) {
+  button.onclick = async () => {
+    tab = button.dataset.tab;
+    for (const id of ['activity','sessions','diff','result']) $(id).hidden = id !== tab;
+    for (const item of document.querySelectorAll('[data-tab]')) item.classList.toggle('active', item === button);
+    if (tab === 'diff' && selected) {
+      const id = selected;
+      $('diff').textContent = '正在读取差异…';
+      try { const value = await api('/api/diff?task=' + id); if (selected === id) $('diff').textContent = value.diff; }
+      catch (err) { $('diff').textContent = err.message; }
+    }
+  };
+}
+function options(id) {
+  $(id).replaceChildren();
+  for (const project of data?.projects || []) {
+    const option = node('option', project.id); option.value = project.id; $(id).append(option);
+  }
+  if (team) $(id).value = team;
+}
+$('new-task').onclick = () => {
+  options('create-team'); createRequest = crypto.randomUUID(); $('create-dialog').showModal();
+};
+$('create-form').onsubmit = async event => {
+  event.preventDefault();
+  const submit = event.submitter; submit.disabled = true;
+  try {
+    const result = await api('/api/command',{action:'create',request_id:createRequest,project_id:$('create-team').value,goal:$('create-goal').value});
+    $('create-dialog').close(); $('create-goal').value = ''; error('');
+    await refresh(); await selectTask(result.task_id);
+  } catch (err) { error(err.message); $('create-dialog').close(); }
+  finally { submit.disabled = false; }
+};
+function setConfig() {
+  const project = data.projects.find(p => p.id === $('settings-team').value);
+  if (project) { $('mode').value = project.workspace_mode; $('slots').value = project.concurrency; }
+}
+$('settings').onclick = () => { options('settings-team'); setConfig(); $('settings-dialog').showModal(); };
+$('settings-team').onchange = setConfig;
+$('settings-form').onsubmit = async event => {
+  event.preventDefault();
+  const result = await act({action:'configure',project_id:$('settings-team').value,
+    workspace_mode:$('mode').value,concurrency:Number($('slots').value)});
+  if (result) $('settings-dialog').close();
+};
+for (const button of document.querySelectorAll('[data-close]')) button.onclick = () => $(button.dataset.close).close();
+$('search').oninput = renderList; $('filter').onchange = renderList; $('refresh').onclick = refresh;
+refresh(); setInterval(() => { if (!document.hidden) refresh(); }, 1000);
+</script>
+</body>
+</html>

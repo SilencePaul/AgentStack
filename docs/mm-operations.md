@@ -72,3 +72,25 @@ check 校验真实终态任务、reviewer/tester 的 PASS 与退出状态、最�
 `/ops mock restart-receiver` 只关闭并重新绑定本机 HTTP 接收线程，返回新的 generation。它不停止业务 Router、Qoder 任务或 MM 诊断；事件去重数据仍在原 SQLite 队列中。重启后可再次 emit 同一版本，确认返回原任务 ID。若重新绑定失败，错误仍通过独立 MM 通道返回，可排查端口后再次显式重启。
 
 `router-receipt` 仅用于 `needs_input` 问答，成功报告使用角色规定的末行判定。若只读评审/测试在工具正常结束后输出了错误格式，监督器保留失败报告，并在工作区未变化时最多重新执行一次该阶段；与工具错误重试共用额度，不延长任务时限。纠正后的合法问题仍需等待原作者在原线程回答。写代码阶段、权限拒绝、工作区变化或重复错误不会套用这条格式重试路径。
+
+### monorepo 的 app 试运行
+
+先在对应 app 的 MM 结果线程用现有配置流程建立 webhook 规则。为每个 app 在 GitLab 的同一个项目登记各自的 webhook URL。以下是合并到 config.local.json 的示例字段，频道、作者 ID、app 路径及测试命令均需按现场填写。保留原 mm 配置的其他字段。
+
+```json
+{
+  "mm": {
+    "channels": [{"channel_id":"MM_CHANNEL_ID","project_id":"d365-team","bot_username":"ag_liuym55"}]
+  },
+  "mr_app_rules": {
+    "d365-review": {"aliases":["d365-nano"],"path":"sales/d365-nano","suite":["python","-m","pytest"]}
+  },
+  "gitlab_author_mm_ids": {"123":"MM_USER_ID"}
+}
+```
+
+键 d365-review 对应 /hooks/gitlab/d365-review。更新文件后重启业务 Router 和独立维护进程。已授权用户在绑定频道以 `@ag_liuym55 任务内容` 开头即可创建该项目任务。结果回复原线程并提醒实际发信人。此入口沿用该项目的执行权限。
+
+匹配标题标识的 MR 投递到该规则所属团队，结果发到规则的 MM 线程并提醒 GitLab 作者对应的 MM 用户。目标分支由已认证合并事件给出。重复合并事件只产生一条消息。每个 app 使用自己的规则和测试命令。试运行阶段需遵守标题约定，多 app MR 应列出所有对应标识，共享目录另需定义测试归属。
+
+测试命令在 app 目录执行。团队应在已隔离、可执行该仓库测试的机器使用 tools/compare_app_tests.py，取目标提交及固定的源提交，在两个临时克隆上执行相同用例，分别输出测试日志、退出码。临时克隆隔离 Git 工作区，主机权限由运行账户或容器限制。仓库须先具备源、目标提交。报告应列出已有与新增失败，合并冲突或无法取得测试输出时报告未验证。实际合并通知要求收到 GitLab merge / merged 事件。

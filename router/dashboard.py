@@ -128,7 +128,7 @@ def dashboard(db):
     tasks = [dict(r) for r in db.execute('SELECT id,project_id,status,created_at FROM tasks ORDER BY rowid DESC')]
     issues = []
     for task in tasks:
-        row = db.execute('SELECT continuation,summary FROM tasks WHERE id=?',(task['id'],)).fetchone()
+        row = db.execute('SELECT continuation,summary,project FROM tasks WHERE id=?',(task['id'],)).fetchone()
         checkpoint = decode(row['continuation'],{}) or {}
         task['resume_pending'] = task['status']=='queued' and bool(checkpoint.get('answers'))
         task['queue_blockers'] = []
@@ -136,7 +136,12 @@ def dashboard(db):
             if not online: task['queue_blockers'].append('router_offline')
             if meta.get('paused')=='1': task['queue_blockers'].append('scheduler_paused')
             if meta.get('project_paused:'+task['project_id']): task['queue_blockers'].append('project_paused')
-            if any(t['id']!=task['id'] and t['project_id']==task['project_id'] and t['status'] in ('running','waiting_input') for t in tasks): task['queue_blockers'].append('project_busy')
+            project = decode(row['project'], {})
+            peers = [t for t in tasks if t['id'] != task['id'] and t['project_id'] == task['project_id'] and t['status'] in ('running','waiting_input')]
+            isolated = project.get('workspace_mode', 'shared') != 'shared'
+            shared_peer = any(decode(db.execute('SELECT project FROM tasks WHERE id=?', (t['id'],)).fetchone()[0], {}).get('workspace_mode', 'shared') == 'shared' for t in peers)
+            if (not isolated or shared_peer) and peers or isolated and sum(t['status'] == 'running' for t in peers) >= project.get('concurrency', 1):
+                task['queue_blockers'].append('project_busy')
             for reason in task['queue_blockers']:
                 issues.append({'task_id':task['id'],'project_id':task['project_id'],'category':reason})
         category = None

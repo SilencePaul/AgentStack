@@ -3,6 +3,7 @@ from pathlib import Path
 import logging
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from .team import TeamWorker
 LOG=logging.getLogger(__name__)
 
@@ -85,10 +86,44 @@ class Scheduler:
         if not 1<=limit<=16:raise ValueError('concurrency must be between 1 and 16')
         self.store,self.command,self.runtime,self.limit=store,command,Path(runtime),limit
         self.factory=worker_factory;self.workers={}
+        self.preparing = {}
+        self.pool = ThreadPoolExecutor(max_workers=limit, thread_name_prefix="workspace")
         self.runtime.mkdir(parents=True,exist_ok=True)
+    def _start(self, task):
+        worker = None
+        try:
+            worker = self.factory(self.command, task, self.runtime/task['id']/('attempt-'+str(task['attempt'])),
+                                  lambda kind, detail: self.store.event(task['id'], kind, detail))
+            worker.start()
+            self.workers[task['id']] = worker
+        except Exception as exc:
+            if worker:
+                try:worker.stop('start failed')
+                except Exception:LOG.exception('Worker cleanup failed for %s', task['id'])
+            self.store.finish(task['id'], 'failed', 'Worker start failed: '+type(exc).__name__, [])
+
     def tick(self):
+        from .workspaces import prepare
+        for task_id, future in list(self.preparing.items()):
+            if not future.done():
+                continue
+            try:
+                project = future.result()
+                task = self.store.save_workspace(task_id, project)
+                if self.store.meta('cancel:' + task_id):
+                    self.store.finish(task_id, 'cancelled', '用户已停止任务。', [])
+                else:
+                    self._start(task)
+            except Exception as exc:
+                self.store.finish(task_id, 'failed', 'Workspace preparation failed: ' + str(exc), [])
+            del self.preparing[task_id]
         for task_id,worker in list(self.workers.items()):
-            try:result=worker.poll()
+            try:
+                if self.store.meta('cancel:' + task_id):
+                    worker.stop('operator cancelled')
+                    result = {'status': 'cancelled', 'summary': '用户已停止任务，工作目录与记录已保留。'}
+                else:
+                    result=worker.poll()
             except Exception as exc:
                 worker.stop('supervisor error')
                 result={'status':'failed','summary':'Worker monitor failed: '+type(exc).__name__,'evidence':[]}
@@ -99,22 +134,26 @@ class Scheduler:
                     self.store.finish(task_id,result['status'],result.get('summary',''),result.get('evidence'))
                 del self.workers[task_id]
         if self.store.meta('paused','0')=='1':return
-        while len(self.workers)<self.limit:
-            task=self.store.claim(self.limit)
-            if not task:break
-            worker=None
-            try:
-                worker=self.factory(self.command,task,self.runtime/task['id']/('attempt-'+str(task['attempt'])),
-                                    lambda kind,detail,tid=task['id']:self.store.event(tid,kind,detail))
-                worker.start();self.workers[task['id']]=worker
-            except Exception as exc:
-                if worker:
-                    try:worker.stop('start failed')
-                    except Exception:pass
-                self.store.finish(task['id'],'failed','Worker start failed: '+type(exc).__name__,[])
+        while len(self.workers) + len(self.preparing) < self.limit:
+            task = self.store.claim(self.limit)
+            if not task:
+                break
+            if self.store.meta('cancel:' + task['id']):
+                self.store.finish(task['id'], 'cancelled', '用户已停止任务。', [])
+            elif task['project'].get('workspace_mode', 'shared') != 'shared' and not task['project'].get('source_path'):
+                self.store.event(task['id'], 'workspace_preparing', {})
+                self.preparing[task['id']] = self.pool.submit(prepare, task, self.runtime.parent)
+            else:
+                self._start(task)
     def shutdown(self):
         for task_id,worker in list(self.workers.items()):
             try:worker.stop('router shutdown')
             except Exception:LOG.exception('Worker cleanup failed for %s',task_id)
             finally:self.store.finish(task_id,'interrupted','Router stopped; execution may have side effects. Inspect evidence before resubmission.',[])
         self.workers.clear()
+        self.pool.shutdown(wait=True, cancel_futures=True)
+        for task_id, future in self.preparing.items():
+            if not future.cancelled() and future.exception() is None:
+                self.store.save_workspace(task_id, future.result())
+            self.store.finish(task_id, 'interrupted', 'Router stopped during workspace preparation.', [])
+        self.preparing.clear()

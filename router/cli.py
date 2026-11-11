@@ -44,12 +44,15 @@ def deliver_pending(store,client,stopping):
         except Exception as exc:failures.append(exc)
     return failures
 
-def serve(store,config,runtime,once=False):
+def serve(store,config,runtime,once=False,config_path=None):
     from .dispatch import PlanningQueue,NaturalRouter
     from .planner import Planner
-    scheduler=Scheduler(store,config['qoder_command'],runtime/'runs',config.get('concurrency',2))
     stopping=threading.Event();threads=[]
     with service_lock(runtime/'service.lock'):
+        if config_path is not None:
+            from .pilot_setup import apply
+            apply(store,config,config_path)
+        scheduler=Scheduler(store,config['qoder_command'],runtime/'runs',config.get('concurrency',2))
         store.recover();store.set_meta('shutdown','0')
         queue=PlanningQueue(store);queue.recover()
         planner=Planner(config['qoder_command'],runtime,model=config.get('router_model','Qwen3.8-Flash'),cancel_event=stopping)
@@ -168,7 +171,7 @@ def main():
         elif args.action=='serve':
             config=json.loads(Path(args.config).read_text(encoding='utf-8-sig'))
             logging.basicConfig(filename=runtime/'service.log',level=logging.INFO,format='%(asctime)s %(levelname)s %(message)s')
-            serve(store,config,runtime,args.once)
+            serve(store,config,runtime,args.once,args.config)
     finally:
         if hasattr(store,'close'):store.close()
 if __name__=='__main__':main()
